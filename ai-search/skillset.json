@@ -1,0 +1,140 @@
+{
+  "name": "${skillsetName}",
+  "description": "Skillset with OCR, text chunking, and Azure OpenAI embeddings via Foundry",
+  "cognitiveServices": null,
+  "skills": [
+    {
+      "@odata.type": "#Microsoft.Skills.Vision.OcrSkill",
+      "name": "ocr-skill",
+      "description": "OCR skill to extract text from images",
+      "context": "/document/normalized_images/*",
+      "lineEnding": "Space",
+      "defaultLanguageCode": "en",
+      "detectOrientation": true,
+      "inputs": [
+        {
+          "name": "image",
+          "source": "/document/normalized_images/*"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "text",
+          "targetName": "text"
+        }
+      ]
+    },
+    {
+      "@odata.type": "#Microsoft.Skills.Text.MergeSkill",
+      "name": "merge-skill",
+      "description": "Merge OCR text from images with document content",
+      "context": "/document",
+      "insertPreTag": " ",
+      "insertPostTag": " ",
+      "inputs": [
+        {
+          "name": "text",
+          "source": "/document/content"
+        },
+        {
+          "name": "itemsToInsert",
+          "source": "/document/normalized_images/*/text"
+        },
+        {
+          "name": "offsets",
+          "source": "/document/normalized_images/*/contentOffset"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "mergedText",
+          "targetName": "mergedText"
+        }
+      ]
+    },
+    {
+      "@odata.type": "#Microsoft.Skills.Text.SplitSkill",
+      "name": "split-skill",
+      "description": "Split skill to chunk documents",
+      "context": "/document",
+      "defaultLanguageCode": "en",
+      "textSplitMode": "pages",
+      "maximumPageLength": 2000,
+      "pageOverlapLength": 200,
+      "unit": "characters",
+      "inputs": [
+        {
+          "name": "text",
+          "source": "/document/mergedText"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "textItems",
+          "targetName": "pages"
+        }
+      ]
+    },
+    {
+      "@odata.type": "#Microsoft.Skills.Text.AzureOpenAIEmbeddingSkill",
+      "name": "text-embedding-skill",
+      "description": "Azure OpenAI Embedding skill for text chunks via Foundry",
+      "context": "/document/pages/*",
+      "resourceUri": "${openAIResourceUri}",
+      "deploymentId": "${embeddingDeploymentId}",
+      "dimensions": ${embeddingDimensions},
+      "modelName": "${embeddingModelName}",
+      "authIdentity": null,
+      "inputs": [
+        {
+          "name": "text",
+          "source": "/document/pages/*"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "embedding",
+          "targetName": "text_vector"
+        }
+      ]
+    }
+  ],
+  "indexProjections": {
+    "selectors": [
+      {
+        "targetIndexName": "${indexName}",
+        "parentKeyFieldName": "text_parent_id",
+        "sourceContext": "/document/pages/*",
+        "mappings": [
+          {
+            "name": "text_vector",
+            "source": "/document/pages/*/text_vector"
+          },
+          {
+            "name": "chunk",
+            "source": "/document/pages/*"
+          },
+          {
+            "name": "title",
+            "source": "/document/metadata_storage_name"
+          },
+          {
+            "name": "original_file_name",
+            "source": "/document/metadata_storage_name"
+          },
+          {
+            "name": "acl_user_ids",
+            "source": "/document/user_ids"
+          },
+          {
+            "name": "acl_group_ids",
+            "source": "/document/group_ids"
+          }
+        ]
+      }
+    ],
+    "parameters": {
+      "projectionMode": "skipIndexingParentDocuments"
+    }
+  }
+}
