@@ -5,7 +5,7 @@ Sync files from SharePoint Online to Azure Blob Storage with permissions (ACLs),
 ## Architecture
 
 ```
-SharePoint Online ──▶ Sync Job (Python) ──▶ Azure Blob Storage ──▶ Azure AI Search
+SharePoint Online ──▶ Sync Job (Python/.NET 10 Function) ──▶ Azure Blob Storage ──▶ Azure AI Search
      files &               delta API              + ACL metadata       + OCR / chunking
      permissions                                                       + vector embeddings
                                                                        + ACL filtering
@@ -15,7 +15,8 @@ SharePoint Online ──▶ Sync Job (Python) ──▶ Azure Blob Storage ─�
 
 | Directory | Description | README |
 |-----------|-------------|--------|
-| [sync/](sync/) | SharePoint → Blob sync job (delta API, permissions) | [sync/README.md](sync/README.md) |
+| [sync/](sync/) | SharePoint → Blob sync job (Python historique) | [sync/README.md](sync/README.md) |
+| [sync-dotnet/](sync-dotnet/) | SharePoint → Blob sync job (Azure Function .NET 10) | [sync-dotnet/README.md](sync-dotnet/README.md) |
 | [ai-search/](ai-search/) | Search index, skillset, indexer deployment | [ai-search/README.md](ai-search/README.md) |
 | [demo/](demo/) | Flask web app — Entra ID login + ACL-filtered search | [demo/README.md](demo/README.md) |
 | [tests/](tests/) | Search verification scripts | [tests/README.md](tests/README.md) |
@@ -43,7 +44,8 @@ This syncs files, deploys search components, waits for indexing, and runs tests.
 ### Run Individual Components
 
 ```bash
-cd sync && python main.py          # Sync only
+cd sync && python main.py          # Sync only (Python historique)
+cd sync-dotnet && func start       # Sync only (.NET 10 Azure Function)
 cd ai-search && ./script.ps1 ...   # Deploy search only
 cd demo && python app.py            # Run demo app
 cd tests && python test_search.py   # Run tests

@@ -1,4 +1,8 @@
-# Sync — Azure Function Deployment
+# Sync — Azure Function Deployment (Legacy Python)
+
+> Cette documentation concerne l'ancienne implémentation Python.
+> 
+> Nouvelle implémentation recommandée: [sync-dotnet/README.md](../../sync-dotnet/README.md)
 
 Deploy the SharePoint sync job as an Azure Function with a daily timer trigger and managed identity.
 

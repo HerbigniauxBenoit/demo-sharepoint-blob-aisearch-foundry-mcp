@@ -39,3 +39,10 @@ ENV/
 
 # Generated files
 deploy/function-app/
+
+# C# / .NET
+sync-dotnet/
+*.sln
+*.csproj
+bin/
+obj/
