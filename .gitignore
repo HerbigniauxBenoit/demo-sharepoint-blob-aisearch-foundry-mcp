@@ -41,8 +41,10 @@ ENV/
 deploy/function-app/
 
 # C# / .NET
-sync-dotnet/
-*.sln
-*.csproj
-bin/
-obj/
+**/bin/
+**/obj/
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+**/local.settings.json
