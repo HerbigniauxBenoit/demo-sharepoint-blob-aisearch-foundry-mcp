@@ -158,6 +158,71 @@ docker build -t sharepoint-sync:latest .
 docker run --env-file .env sharepoint-sync:latest
 ```
 
+## Azure Function (sans Docker, app existante)
+
+Le dossier `sync` peut être publié directement dans une **Function App Python Linux** existante, sans Docker local, en utilisant un build distant (Oryx).
+
+### Prérequis
+
+- Azure CLI (`az`)
+- Azure Functions Core Tools v4 (`func`)
+- Une Function App existante en runtime **Python** (Linux)
+
+### 1) Déployer le code avec build distant
+
+Depuis `sync/`:
+
+```powershell
+func azure functionapp publish <FUNCTION_APP_NAME> --python --build remote
+```
+
+### 2) Configurer les variables d'application
+
+```powershell
+az functionapp config appsettings set \
+   --resource-group <RESOURCE_GROUP> \
+   --name <FUNCTION_APP_NAME> \
+   --settings \
+      FUNCTIONS_WORKER_RUNTIME=python \
+      TIMER_SCHEDULE="0 0 2 * * *" \
+      SHAREPOINT_SITE_URL="https://contoso.sharepoint.com/sites/MySite" \
+      SHAREPOINT_DRIVE_NAME="Documents" \
+      SHAREPOINT_FOLDER_PATH="/" \
+      AZURE_STORAGE_ACCOUNT_NAME="<storage-account>" \
+      AZURE_BLOB_CONTAINER_NAME="sharepoint-sync" \
+      AZURE_BLOB_PREFIX="" \
+      DELETE_ORPHANED_BLOBS="false" \
+      SYNC_PERMISSIONS="true" \
+      DRY_RUN="false" \
+      FORCE_FULL_SYNC="false"
+```
+
+### 3) Script prêt à l'emploi (PowerShell)
+
+Un script est fourni: `sync/deploy/deploy-existing-function.ps1`
+
+Exemple:
+
+```powershell
+./deploy/deploy-existing-function.ps1 \
+   -ResourceGroup "rg-my-func" \
+   -FunctionAppName "func-my-python-sync" \
+   -SharePointSiteUrl "https://contoso.sharepoint.com/sites/MySite" \
+   -StorageAccountName "mystorageaccount" \
+   -BlobContainerName "sharepoint-sync"
+```
+
+### 4) Permissions recommandées
+
+- **Storage**: rôle `Storage Blob Data Contributor` pour l'identité de la Function App.
+- **SharePoint/Graph**: `Sites.Read.All` (ou `Sites.Selected` + grant explicite sur le site).
+
+### 5) Monitoring
+
+```powershell
+az functionapp log tail --resource-group <RESOURCE_GROUP> --name <FUNCTION_APP_NAME>
+```
+
 ## Delta Token
 
 Stored at `.sync-state/delta-token.json` in the blob container. Delete it or set `FORCE_FULL_SYNC=true` to force a full re-crawl.
