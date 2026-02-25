@@ -65,8 +65,8 @@ class BlobFile:
     name: str
     size: int
     last_modified: datetime
-    content_hash: str | None = None  # MD5 or ETag
-    metadata: Dict[str, str] | None = None
+    content_hash: Optional[str] = None  # MD5 or ETag
+    metadata: Optional[Dict[str, str]] = None
 
 
 class BlobStorageClient:
@@ -98,9 +98,9 @@ class BlobStorageClient:
         self.account_url = account_url
         self.container_name = container_name
         self.blob_prefix = blob_prefix.strip("/")
-        self._credential: DefaultAzureCredential | None = None
-        self._service_client: BlobServiceClient | None = None
-        self._container_client: ContainerClient | None = None
+        self._credential: Optional[DefaultAzureCredential] = None
+        self._service_client: Optional[BlobServiceClient] = None
+        self._container_client: Optional[ContainerClient] = None
     
     async def __aenter__(self) -> "BlobStorageClient":
         """Async context manager entry."""
@@ -175,7 +175,7 @@ class BlobStorageClient:
                 metadata=blob.metadata
             )
     
-    async def get_blob_metadata(self, blob_name: str) -> BlobFile | None:
+    async def get_blob_metadata(self, blob_name: str) -> Optional[BlobFile]:
         """
         Get metadata for a specific blob.
         
@@ -208,7 +208,7 @@ class BlobStorageClient:
         content: bytes,
         sharepoint_item_id: str,
         sharepoint_last_modified: datetime,
-        sharepoint_content_hash: str | None = None,
+        sharepoint_content_hash: Optional[str] = None,
         dry_run: bool = False
     ) -> str:
         """
@@ -320,7 +320,7 @@ class BlobStorageClient:
                           directory_path=directory_path, 
                           blobs_deleted=blobs_deleted)
     
-    def should_update(self, blob: BlobFile, sp_last_modified: datetime, sp_content_hash: str | None) -> bool:
+    def should_update(self, blob: BlobFile, sp_last_modified: datetime, sp_content_hash: Optional[str]) -> bool:
         """
         Determine if a blob should be updated based on SharePoint file changes.
         

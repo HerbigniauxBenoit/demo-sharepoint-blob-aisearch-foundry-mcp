@@ -66,8 +66,8 @@ class SharePointFile:
     path: str  # Full path relative to the drive root
     size: int
     last_modified: datetime
-    download_url: str | None = None
-    content_hash: str | None = None  # eTag or cTag for change detection
+    download_url: Optional[str] = None
+    content_hash: Optional[str] = None  # eTag or cTag for change detection
 
 
 class DeltaChangeType(Enum):
@@ -111,10 +111,10 @@ class SharePointClient:
         """
         self.site_url = site_url
         self.drive_name = drive_name
-        self.site_id: str | None = None
-        self.drive_id: str | None = None
-        self._credential: DefaultAzureCredential | None = None
-        self._client: GraphServiceClient | None = None
+        self.site_id: Optional[str] = None
+        self.drive_id: Optional[str] = None
+        self._credential: Optional[DefaultAzureCredential] = None
+        self._client: Optional[GraphServiceClient] = None
     
     async def __aenter__(self) -> "SharePointClient":
         """Async context manager entry."""
@@ -334,7 +334,7 @@ class SharePointClient:
 
     async def get_delta(
         self,
-        delta_link: str | None = None,
+        delta_link: Optional[str] = None,
     ) -> DeltaResult:
         """
         Use the Microsoft Graph delta API to get incremental changes.
@@ -369,7 +369,7 @@ class SharePointClient:
         new_delta_link = ""
 
         async with httpx.AsyncClient(timeout=120) as http:
-            next_url: str | None = url
+            next_url: Optional[str] = url
             page = 0
 
             while next_url:

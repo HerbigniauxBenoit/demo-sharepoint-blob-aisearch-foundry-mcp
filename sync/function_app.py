@@ -3,6 +3,7 @@ import json
 import logging
 import os
 import threading
+from typing import Dict, Optional
 
 import azure.functions as func
 
@@ -13,7 +14,7 @@ app = func.FunctionApp()
 _sync_lock = threading.Lock()
 
 
-def _parse_bool(value: str | None) -> bool | None:
+def _parse_bool(value: Optional[str]) -> Optional[bool]:
     if value is None:
         return None
     normalized = value.strip().lower()
@@ -24,10 +25,10 @@ def _parse_bool(value: str | None) -> bool | None:
     raise ValueError(f"Invalid boolean value '{value}'")
 
 
-def _run_sync(overrides: dict[str, str] | None = None) -> int:
+def _run_sync(overrides: Optional[Dict[str, str]] = None) -> int:
     overrides = overrides or {}
     with _sync_lock:
-        previous_values: dict[str, str | None] = {}
+        previous_values: Dict[str, Optional[str]] = {}
         for key, value in overrides.items():
             previous_values[key] = os.environ.get(key)
             os.environ[key] = value
@@ -42,7 +43,7 @@ def _run_sync(overrides: dict[str, str] | None = None) -> int:
                     os.environ[key] = previous
 
 
-def _get_request_value(req: func.HttpRequest, name: str) -> str | None:
+def _get_request_value(req: func.HttpRequest, name: str) -> Optional[str]:
     if name in req.params:
         return req.params.get(name)
 

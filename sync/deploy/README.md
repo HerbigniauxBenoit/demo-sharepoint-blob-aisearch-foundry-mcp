@@ -78,6 +78,33 @@ az functionapp log tail --name func-sharepoint-sync --resource-group rg-sharepoi
 az functionapp show --name func-sharepoint-sync --resource-group rg-sharepoint-sync --query state
 ```
 
+## Verify HTTP Function (post-deploy)
+
+Script PowerShell fourni: `verify-http-function.ps1`
+
+Vérifie automatiquement:
+- runtime Python (`linuxFxVersion`)
+- `FUNCTIONS_WORKER_RUNTIME=python`
+- présence de la fonction `sharepoint_sync_http`
+- présence du binding `httpTrigger`
+
+Exécution:
+
+```powershell
+./verify-http-function.ps1 `
+	-ResourceGroup "<RESOURCE_GROUP>" `
+	-FunctionAppName "<FUNCTION_APP_NAME>"
+```
+
+Test HTTP réel (optionnel):
+
+```powershell
+./verify-http-function.ps1 `
+	-ResourceGroup "<RESOURCE_GROUP>" `
+	-FunctionAppName "<FUNCTION_APP_NAME>" `
+	-InvokeEndpoint
+```
+
 ## Cleanup
 
 ```bash
