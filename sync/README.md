@@ -114,26 +114,6 @@ pip install -r requirements.txt
 python main.py
 ```
 
-## Preflight local (sans déploiement)
-
-Pour éviter les essais/erreurs en Azure, lance un contrôle local avant publication:
-
-```bash
-python preflight.py
-```
-
-Ce script vérifie:
-- la version Python locale (3.9+)
-- la présence des fichiers Azure Functions (`host.json`, `function_app.py`, `requirements.txt`)
-- la compilation des fichiers Python
-- l'import de `function_app.py` et la découverte des fonctions
-
-Optionnel (vérification minimale des variables d'environnement):
-
-```bash
-python preflight.py --check-env
-```
-
 ## HTTP Trigger (query params)
 
 Le job est déclenché via endpoint HTTP pour lancer une synchro à la demande.

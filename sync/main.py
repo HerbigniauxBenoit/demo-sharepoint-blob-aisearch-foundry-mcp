@@ -16,7 +16,7 @@ import logging
 import os
 import sys
 from dataclasses import dataclass
-from typing import Dict, Set, List, Optional
+from typing import Dict, Set, List
 # Load environment variables from .env file for local development
 from dotenv import load_dotenv
 load_dotenv()
@@ -186,7 +186,7 @@ async def sync_sharepoint_to_blob(config: Config) -> SyncStats:
         ) as blob_client:
 
             # ---- Try delta (incremental) sync ---- #
-            delta_link: Optional[str] = None
+            delta_link: str | None = None
             if not force_full:
                 delta_link = await blob_client.load_delta_token()
 

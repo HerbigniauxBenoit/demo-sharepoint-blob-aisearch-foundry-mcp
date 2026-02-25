@@ -1,0 +1,9 @@
+{
+  "profiles": {
+    "SharePointSync.Functions": {
+      "commandName": "Project",
+      "commandLineArgs": "start --port 7071",
+      "launchBrowser": false
+    }
+  }
+}
