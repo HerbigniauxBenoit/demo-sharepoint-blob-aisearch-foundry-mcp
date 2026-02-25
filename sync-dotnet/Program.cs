@@ -1,16 +1,19 @@
 using Azure.Core;
 using Azure.Identity;
-using Microsoft.Azure.Functions.Worker.Builder;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using SharePointSync.Functions.Services;
 
-var builder = FunctionsApplication.CreateBuilder(args);
+var host = new HostBuilder()
+    .ConfigureFunctionsWorkerDefaults()
+    .ConfigureServices(services =>
+    {
+        services.AddHttpClient();
+        services.AddSingleton<TokenCredential>(_ => new DefaultAzureCredential());
+        services.AddSingleton<SharePointGraphClient>();
+        services.AddSingleton<BlobStorageSyncClient>();
+        services.AddSingleton<SharePointSyncOrchestrator>();
+    })
+    .Build();
 
-builder.Services.AddHttpClient();
-builder.Services.AddSingleton<TokenCredential>(_ => new DefaultAzureCredential());
-builder.Services.AddSingleton<SharePointGraphClient>();
-builder.Services.AddSingleton<BlobStorageSyncClient>();
-builder.Services.AddSingleton<SharePointSyncOrchestrator>();
-
-builder.Build().Run();
+host.Run();

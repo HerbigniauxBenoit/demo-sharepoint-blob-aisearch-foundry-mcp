@@ -38,7 +38,7 @@ public sealed class BlobStorageSyncClient
         var result = new Dictionary<string, BlobFile>(StringComparer.OrdinalIgnoreCase);
         var prefix = string.IsNullOrWhiteSpace(_blobPrefix) ? null : _blobPrefix;
 
-        await foreach (var blob in _containerClient!.GetBlobsAsync(traits: BlobTraits.Metadata, prefix: prefix, cancellationToken: cancellationToken))
+        await foreach (var blob in _containerClient!.GetBlobsAsync(traits: BlobTraits.Metadata, states: BlobStates.All, prefix: prefix, cancellationToken: cancellationToken))
         {
             if (blob.Name.EndsWith('/'))
             {
@@ -220,7 +220,7 @@ public sealed class BlobStorageSyncClient
     private async Task DeleteDirectoryRecursiveAsync(string directoryPath, CancellationToken cancellationToken)
     {
         var prefix = directoryPath.TrimEnd('/') + "/";
-        await foreach (var blob in _containerClient!.GetBlobsAsync(prefix: prefix, cancellationToken: cancellationToken))
+        await foreach (var blob in _containerClient!.GetBlobsAsync(traits: BlobTraits.None, states: BlobStates.All, prefix: prefix, cancellationToken: cancellationToken))
         {
             await _containerClient.GetBlobClient(blob.Name).DeleteIfExistsAsync(cancellationToken: cancellationToken);
         }
