@@ -114,6 +114,33 @@ pip install -r requirements.txt
 python main.py
 ```
 
+## HTTP Trigger (query params)
+
+Le job expose aussi un endpoint HTTP pour lancer une synchro à la demande (en plus du timer).
+
+- Route: `/api/sharepoint-sync`
+- Méthodes: `GET`, `POST`
+- Auth: `function` (passer la function key via `code=...`)
+
+### Paramètres supportés
+
+- `force_full_sync` → override `FORCE_FULL_SYNC`
+- `dry_run` → override `DRY_RUN`
+- `delete_orphaned_blobs` → override `DELETE_ORPHANED_BLOBS`
+- `sync_permissions` → override `SYNC_PERMISSIONS`
+
+Valeurs booléennes acceptées: `true/false`, `1/0`, `yes/no`.
+
+Exemples:
+
+```bash
+# Local (func start)
+curl "http://localhost:7071/api/sharepoint-sync?force_full_sync=true&dry_run=true"
+
+# Azure Function App (avec key)
+curl "https://<function-app>.azurewebsites.net/api/sharepoint-sync?force_full_sync=false&code=<FUNCTION_KEY>"
+```
+
 ## Environment Variables
 
 | Variable | Required | Default | Description |
@@ -172,6 +199,15 @@ Le dossier `sync` peut être publié directement dans une **Function App Python 
 
 Depuis `sync/`:
 
+Si votre Function App est en **Python 3.14** (erreur Flex: _"Remote build for python 3.14 is not yet supported for Flex"_), forcez d'abord une version supportée:
+
+```powershell
+az functionapp config set \
+   --resource-group <RESOURCE_GROUP> \
+   --name <FUNCTION_APP_NAME> \
+   --linux-fx-version "PYTHON|3.12"
+```
+
 ```powershell
 func azure functionapp publish <FUNCTION_APP_NAME> --python --build remote
 ```
@@ -209,6 +245,7 @@ Exemple:
    -FunctionAppName "func-my-python-sync" \
    -SharePointSiteUrl "https://contoso.sharepoint.com/sites/MySite" \
    -StorageAccountName "mystorageaccount" \
+   -PythonRuntimeVersion "3.12" \
    -BlobContainerName "sharepoint-sync"
 ```
 
