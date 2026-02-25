@@ -3,7 +3,6 @@
   "Values": {
     "AzureWebJobsStorage": "UseDevelopmentStorage=true",
     "FUNCTIONS_WORKER_RUNTIME": "python",
-    "TIMER_SCHEDULE": "0 0 2 * * *",
     "SHAREPOINT_SITE_URL": "https://your-tenant.sharepoint.com/sites/your-site",
     "SHAREPOINT_DRIVE_NAME": "Documents",
     "SHAREPOINT_FOLDER_PATH": "/",

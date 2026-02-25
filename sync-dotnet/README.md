@@ -25,7 +25,17 @@ dotnet restore
 func start
 ```
 
-Le trigger est timer-based, avec cron via `SYNC_SCHEDULE` (défaut: `0 0 * * * *`).
+Le trigger est HTTP (`GET`/`POST`) sur la route `/api/sharepoint-sync`.
+
+Exemples:
+
+```powershell
+# GET
+curl "http://localhost:7071/api/sharepoint-sync?dry_run=true"
+
+# POST JSON
+curl -X POST "http://localhost:7071/api/sharepoint-sync" -H "Content-Type: application/json" -d "{\"force_full_sync\":true,\"dry_run\":false}"
+```
 
 ## Variables d'environnement
 
@@ -41,7 +51,6 @@ Le trigger est timer-based, avec cron via `SYNC_SCHEDULE` (défaut: `0 0 * * * *
 | `DRY_RUN` | No | `false` |
 | `SYNC_PERMISSIONS` | No | `false` |
 | `FORCE_FULL_SYNC` | No | `false` |
-| `SYNC_SCHEDULE` | No | `0 0 * * * *` |
 
 ## Déploiement Azure Function
 
@@ -51,7 +60,34 @@ Exemple rapide:
 
 ```powershell
 cd sync-dotnet
-dotnet publish -c Release
+func azure functionapp publish <FUNCTION_APP_NAME>
 ```
 
-Puis déployer avec `az functionapp deployment source config-zip` ou CI/CD.
+Configurer les app settings:
+
+```powershell
+az functionapp config appsettings set --resource-group <RG> --name <FUNCTION_APP_NAME> --settings \
+	FUNCTIONS_WORKER_RUNTIME=dotnet-isolated \
+	SHAREPOINT_SITE_URL="https://contoso.sharepoint.com/sites/MySite" \
+	SHAREPOINT_DRIVE_NAME="Documents" \
+	SHAREPOINT_FOLDER_PATH="/" \
+	AZURE_STORAGE_ACCOUNT_NAME="<storage-account>" \
+	AZURE_BLOB_CONTAINER_NAME="sharepoint-sync" \
+	AZURE_BLOB_PREFIX="" \
+	DELETE_ORPHANED_BLOBS="false" \
+	SYNC_PERMISSIONS="true" \
+	DRY_RUN="false" \
+	FORCE_FULL_SYNC="false"
+```
+
+Appeler la function en Azure:
+
+```powershell
+curl "https://<FUNCTION_APP_NAME>.azurewebsites.net/api/sharepoint-sync?dry_run=true&code=<FUNCTION_KEY>"
+```
+
+Récupérer la function key:
+
+```powershell
+az functionapp function keys list --resource-group <RG> --name <FUNCTION_APP_NAME> --function-name SharePointBlobSync
+```

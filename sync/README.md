@@ -116,7 +116,7 @@ python main.py
 
 ## HTTP Trigger (query params)
 
-Le job expose aussi un endpoint HTTP pour lancer une synchro à la demande (en plus du timer).
+Le job est déclenché via endpoint HTTP pour lancer une synchro à la demande.
 
 - Route: `/api/sharepoint-sync`
 - Méthodes: `GET`, `POST`

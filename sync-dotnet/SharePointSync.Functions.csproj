@@ -12,7 +12,7 @@
     <PackageReference Include="Azure.Identity" Version="1.14.2" />
     <PackageReference Include="Azure.Storage.Blobs" Version="12.25.1" />
     <PackageReference Include="Microsoft.Azure.Functions.Worker" Version="2.*" />
-    <PackageReference Include="Microsoft.Azure.Functions.Worker.Extensions.Timer" Version="4.3.1" />
+    <PackageReference Include="Microsoft.Azure.Functions.Worker.Extensions.Http" Version="3.2.0" />
     <PackageReference Include="Microsoft.Azure.Functions.Worker.Sdk" Version="2.*" OutputItemType="Analyzer" PrivateAssets="all" />
   </ItemGroup>
 </Project>
