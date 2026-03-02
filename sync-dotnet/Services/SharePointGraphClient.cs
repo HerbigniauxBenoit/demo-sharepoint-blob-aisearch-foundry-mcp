@@ -1,6 +1,7 @@
 using System.Net.Http.Headers;
 using System.Text.Json;
 using Azure.Core;
+using Microsoft.Extensions.Logging;
 using SharePointSync.Functions.Models;
 
 namespace SharePointSync.Functions.Services;
@@ -10,15 +11,17 @@ public sealed class SharePointGraphClient
     private static readonly JsonSerializerOptions JsonOptions = new() { PropertyNameCaseInsensitive = true };
     private readonly IHttpClientFactory _httpClientFactory;
     private readonly TokenCredential _credential;
+    private readonly ILogger<SharePointGraphClient> _logger;
     private readonly string[] _scopes = ["https://graph.microsoft.com/.default"];
 
     private string? _siteId;
     private string? _driveId;
 
-    public SharePointGraphClient(IHttpClientFactory httpClientFactory, TokenCredential credential)
+    public SharePointGraphClient(IHttpClientFactory httpClientFactory, TokenCredential credential, ILogger<SharePointGraphClient> logger)
     {
         _httpClientFactory = httpClientFactory;
         _credential = credential;
+        _logger = logger;
     }
 
     public (string SiteId, string DriveId) GetResolvedIds()
@@ -359,18 +362,38 @@ public sealed class SharePointGraphClient
 
     private async Task<HttpRequestMessage> CreateRequestAsync(HttpMethod method, string url, CancellationToken cancellationToken)
     {
-        var token = await _credential.GetTokenAsync(new TokenRequestContext(_scopes), cancellationToken);
-        var request = new HttpRequestMessage(method, url);
-        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token.Token);
-        request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
-        return request;
+        try
+        {
+            _logger.LogDebug("Requesting token for scopes: {Scopes}", string.Join(", ", _scopes));
+            var token = await _credential.GetTokenAsync(new TokenRequestContext(_scopes), cancellationToken);
+            _logger.LogDebug("Token acquired successfully, expires at {ExpiresOn}", token.ExpiresOn);
+
+            var request = new HttpRequestMessage(method, url);
+            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token.Token);
+            request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
+            return request;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to acquire token for Microsoft Graph API. Ensure Managed Identity has Sites.Read.All and Files.Read.All permissions.");
+            throw;
+        }
     }
 
     private async Task<JsonDocument> GetJsonAsync(string url, CancellationToken cancellationToken)
     {
         using var request = await CreateRequestAsync(HttpMethod.Get, url, cancellationToken);
         using var client = _httpClientFactory.CreateClient();
+
+        _logger.LogDebug("Sending request to: {Url}", url);
         using var response = await client.SendAsync(request, cancellationToken);
+
+        if (!response.IsSuccessStatusCode)
+        {
+            var errorContent = await response.Content.ReadAsStringAsync(cancellationToken);
+            _logger.LogError("Graph API request failed. Status: {StatusCode}, Response: {Response}", response.StatusCode, errorContent);
+        }
+
         response.EnsureSuccessStatusCode();
 
         await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken);

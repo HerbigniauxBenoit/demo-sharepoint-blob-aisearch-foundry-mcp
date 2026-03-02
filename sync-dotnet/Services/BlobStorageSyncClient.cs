@@ -3,6 +3,7 @@ using Azure;
 using Azure.Core;
 using Azure.Storage.Blobs;
 using Azure.Storage.Blobs.Models;
+using Microsoft.Extensions.Logging;
 using SharePointSync.Functions.Models;
 
 namespace SharePointSync.Functions.Services;
@@ -14,16 +15,35 @@ public sealed class BlobStorageSyncClient
     public const string MetadataSpLastModified = "sharepoint_last_modified";
     public const string MetadataSpContentHash = "sharepoint_content_hash";
 
+    private readonly ILogger<BlobStorageSyncClient> _logger;
     private BlobContainerClient? _containerClient;
     private string _blobPrefix = string.Empty;
 
+    public BlobStorageSyncClient(ILogger<BlobStorageSyncClient> logger)
+    {
+        _logger = logger;
+    }
+
     public async Task InitializeAsync(SyncOptions options, TokenCredential credential, CancellationToken cancellationToken)
     {
-        var service = new BlobServiceClient(new Uri(options.BlobAccountUrl), credential);
-        _containerClient = service.GetBlobContainerClient(options.ContainerName);
-        _blobPrefix = options.BlobPrefix.Trim('/');
+        try
+        {
+            _logger.LogInformation("Initializing Blob Storage client for account: {AccountUrl}, container: {Container}", 
+                options.BlobAccountUrl, options.ContainerName);
 
-        await _containerClient.CreateIfNotExistsAsync(cancellationToken: cancellationToken);
+            var service = new BlobServiceClient(new Uri(options.BlobAccountUrl), credential);
+            _containerClient = service.GetBlobContainerClient(options.ContainerName);
+            _blobPrefix = options.BlobPrefix.Trim('/');
+
+            await _containerClient.CreateIfNotExistsAsync(cancellationToken: cancellationToken);
+
+            _logger.LogInformation("Blob Storage client initialized successfully");
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to initialize Blob Storage client. Ensure Managed Identity has 'Storage Blob Data Contributor' role.");
+            throw;
+        }
     }
 
     public string GetBlobName(string sharePointPath)

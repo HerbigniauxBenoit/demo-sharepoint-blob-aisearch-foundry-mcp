@@ -1,11 +1,39 @@
 {
   "version": "2.0",
   "logging": {
+    "logLevel": {
+      "default": "Information",
+      "Microsoft.Azure.Functions.Worker": "Warning",
+      "Microsoft.AspNetCore": "Warning"
+    },
     "applicationInsights": {
       "samplingSettings": {
         "isEnabled": true,
-        "excludedTypes": "Request"
-      }
+        "maxTelemetryItemsPerSecond": 20,
+        "excludedTypes": "Request",
+        "includedTypes": "Exception;Trace"
+      },
+      "enableLiveMetricsFilters": true,
+      "enableDependencyTracking": true,
+      "enablePerformanceCountersCollection": true
     }
+  },
+  "functionTimeout": "00:30:00",
+  "extensions": {
+    "http": {
+      "routePrefix": "api"
+    }
+  },
+  "retry": {
+    "strategy": "fixedDelay",
+    "maxRetryCount": 3,
+    "delayInterval": "00:00:05"
+  },
+  "healthMonitor": {
+    "enabled": true,
+    "healthCheckInterval": "00:00:10",
+    "healthCheckWindow": "00:02:00",
+    "healthCheckThreshold": 6,
+    "counterThreshold": 0.80
   }
 }
