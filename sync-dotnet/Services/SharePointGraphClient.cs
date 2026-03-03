@@ -375,7 +375,7 @@ public sealed class SharePointGraphClient
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Failed to acquire token for Microsoft Graph API. Ensure Managed Identity has Sites.Read.All and Files.Read.All permissions.");
+            _logger.LogError(ex, "Failed to acquire token for Microsoft Graph API. Ensure Managed Identity has Sites.Selected permission and access has been granted to the specific SharePoint site.");
             throw;
         }
     }

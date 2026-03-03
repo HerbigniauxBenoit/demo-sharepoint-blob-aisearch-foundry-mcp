@@ -33,16 +33,23 @@ var host = new HostBuilder()
         // Azure SDK clients
         services.AddHttpClient();
 
-        // Configure DefaultAzureCredential with logging
+        // Configure credential for authentication
         services.AddSingleton<TokenCredential>(sp =>
         {
             var logger = sp.GetRequiredService<ILoggerFactory>().CreateLogger("TokenCredential");
-            logger.LogInformation("Initializing DefaultAzureCredential for Managed Identity authentication");
+            var configuration = sp.GetRequiredService<IConfiguration>();
 
+            var managedIdentityClientId = configuration["AZURE_CLIENT_ID"];
+
+            if (!string.IsNullOrWhiteSpace(managedIdentityClientId))
+            {
+                logger.LogInformation("Initializing ManagedIdentityCredential with Client ID: {ClientId}", managedIdentityClientId);
+                return new ManagedIdentityCredential(managedIdentityClientId);
+            }
+
+            logger.LogInformation("Initializing DefaultAzureCredential for authentication");
             var credential = new DefaultAzureCredential(new DefaultAzureCredentialOptions
             {
-                // In production, prioritize Managed Identity
-                // In development, use Visual Studio, Azure CLI, or other dev credentials
                 ExcludeEnvironmentCredential = false,
                 ExcludeWorkloadIdentityCredential = false,
                 ExcludeManagedIdentityCredential = false,
