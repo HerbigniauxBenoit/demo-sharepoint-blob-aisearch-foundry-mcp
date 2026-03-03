@@ -37,30 +37,22 @@ var host = new HostBuilder()
         services.AddSingleton<TokenCredential>(sp =>
         {
             var logger = sp.GetRequiredService<ILoggerFactory>().CreateLogger("TokenCredential");
-            var configuration = sp.GetRequiredService<IConfiguration>();
+            logger.LogInformation("Initializing DefaultAzureCredential for Managed Identity authentication");
 
-            var managedIdentityClientId = configuration["AZURE_CLIENT_ID"];
-
-            if (!string.IsNullOrWhiteSpace(managedIdentityClientId))
-            {
-                logger.LogInformation("Initializing ManagedIdentityCredential with Client ID: {ClientId}", managedIdentityClientId);
-                return new ManagedIdentityCredential(managedIdentityClientId);
-            }
-
-            logger.LogInformation("Initializing DefaultAzureCredential for authentication");
             var credential = new DefaultAzureCredential(new DefaultAzureCredentialOptions
             {
                 ExcludeEnvironmentCredential = false,
                 ExcludeWorkloadIdentityCredential = false,
                 ExcludeManagedIdentityCredential = false,
-                ExcludeVisualStudioCredential = false,
-                ExcludeVisualStudioCodeCredential = false,
-                ExcludeAzureCliCredential = false,
+                ExcludeVisualStudioCredential = true,
+                ExcludeVisualStudioCodeCredential = true,
+                ExcludeAzureCliCredential = true,
                 ExcludeAzurePowerShellCredential = true,
-                ExcludeInteractiveBrowserCredential = true
+                ExcludeInteractiveBrowserCredential = true,
+                Diagnostics = { IsLoggingEnabled = true }
             });
 
-            logger.LogInformation("DefaultAzureCredential initialized successfully");
+            logger.LogInformation("DefaultAzureCredential initialized - will use assigned Managed Identity");
             return credential;
         });
 
