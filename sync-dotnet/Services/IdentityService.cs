@@ -47,9 +47,14 @@ public class IdentityService
                 _logger.LogInformation("Tenant ID: {TenantId}", tenantId);
             }
 
+            _logger.LogInformation("Attempting to acquire token from Microsoft Graph...");
+
             // Get access token and parse JWT claims
             var tokenRequestContext = new TokenRequestContext(new[] { "https://graph.microsoft.com/.default" });
-            var token = _tokenCredential.GetTokenAsync(tokenRequestContext, CancellationToken.None).Result;
+            var tokenTask = _tokenCredential.GetTokenAsync(tokenRequestContext, CancellationToken.None);
+            var token = tokenTask.GetAwaiter().GetResult();
+
+            _logger.LogInformation("Token acquired successfully!");
 
             var handler = new JwtSecurityTokenHandler();
             var jwtToken = handler.ReadJwtToken(token.Token);
@@ -73,11 +78,29 @@ public class IdentityService
                 _logger.LogInformation("App ID: {AppId}", appId);
             }
 
+            // Log identity name
+            var uniqueName = jwtToken.Claims.FirstOrDefault(c => c.Type == "unique_name")?.Value;
+            if (!string.IsNullOrEmpty(uniqueName))
+            {
+                _logger.LogInformation("Identity Name: {UniqueName}", uniqueName);
+            }
+
+            // Log all claims for debugging
+            _logger.LogInformation("All JWT Claims:");
+            foreach (var claim in jwtToken.Claims)
+            {
+                _logger.LogInformation("  {ClaimType}: {ClaimValue}", claim.Type, claim.Value);
+            }
+
             // Log roles if present
             var roles = jwtToken.Claims.Where(c => c.Type == "roles");
             if (roles.Any())
             {
                 _logger.LogInformation("Assigned Roles: {Roles}", string.Join(", ", roles.Select(r => r.Value)));
+            }
+            else
+            {
+                _logger.LogWarning("No application roles found in token! Make sure to assign Graph API permissions.");
             }
 
             // Log scopes/scp if present
@@ -87,11 +110,12 @@ public class IdentityService
                 _logger.LogInformation("Delegated Permissions (Scopes): {Scopes}", scopes);
             }
 
-            _logger.LogInformation("================================================");
+            _logger.LogInformation("==================================================");
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error logging identity details");
+            _logger.LogError(ex, "CRITICAL ERROR: Unable to log identity details. Message: {Message}", ex.Message);
+            throw;
         }
     }
 }

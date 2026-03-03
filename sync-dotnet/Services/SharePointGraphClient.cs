@@ -37,7 +37,13 @@ public sealed class SharePointGraphClient
     public async Task InitializeAsync(SyncOptions options, CancellationToken cancellationToken)
     {
         var siteUri = new Uri(options.SharePointSiteUrl);
-        var siteLookup = $"https://graph.microsoft.com/v1.0/sites/{siteUri.Host}:{siteUri.AbsolutePath}";
+        
+        // Construire correctement l'URL avec le path relatif sans le slash initial
+        var relativePath = siteUri.AbsolutePath.TrimStart('/');
+        var siteLookup = $"https://graph.microsoft.com/v1.0/sites/{siteUri.Host}:/{relativePath}";
+        
+        _logger.LogInformation("Resolving SharePoint site ID from: {SiteLookup}", siteLookup);
+        
         var siteDoc = await GetJsonAsync(siteLookup, cancellationToken);
         _siteId = siteDoc.RootElement.GetProperty("id").GetString();
 
@@ -45,6 +51,8 @@ public sealed class SharePointGraphClient
         {
             throw new InvalidOperationException($"Unable to resolve site from {options.SharePointSiteUrl}");
         }
+        
+        _logger.LogInformation("SharePoint Site ID resolved: {SiteId}", _siteId);
 
         var drivesDoc = await GetJsonAsync($"https://graph.microsoft.com/v1.0/sites/{_siteId}/drives", cancellationToken);
         foreach (var drive in drivesDoc.RootElement.GetProperty("value").EnumerateArray())
@@ -61,6 +69,8 @@ public sealed class SharePointGraphClient
         {
             throw new InvalidOperationException($"Drive '{options.SharePointDriveName}' not found on site '{options.SharePointSiteUrl}'.");
         }
+        
+        _logger.LogInformation("SharePoint Drive ID resolved: {DriveId} for drive '{DriveName}'", _driveId, options.SharePointDriveName);
     }
 
     public async Task<IReadOnlyList<SharePointFile>> ListFilesAsync(string folderPath, CancellationToken cancellationToken)

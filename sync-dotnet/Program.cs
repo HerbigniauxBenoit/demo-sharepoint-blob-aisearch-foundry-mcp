@@ -69,10 +69,21 @@ var host = new HostBuilder()
     .Build();
 
 // Log identity information at startup
-using (var scope = host.Services.CreateScope())
+try
 {
+    using var scope = host.Services.CreateScope();
+    var logger = scope.ServiceProvider.GetRequiredService<ILoggerFactory>().CreateLogger("Startup");
+    logger.LogInformation("========== APPLICATION STARTING ==========");
+    
     var identityService = scope.ServiceProvider.GetRequiredService<IdentityService>();
     identityService.LogIdentityDetails();
+    
+    logger.LogInformation("========== IDENTITY CHECKS COMPLETED ==========");
+}
+catch (Exception ex)
+{
+    Console.WriteLine($"ERROR during identity initialization: {ex.Message}");
+    Console.WriteLine($"Stack trace: {ex.StackTrace}");
 }
 
 host.Run();
