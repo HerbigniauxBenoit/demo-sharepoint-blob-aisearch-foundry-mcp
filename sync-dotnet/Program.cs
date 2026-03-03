@@ -37,23 +37,9 @@ var host = new HostBuilder()
         services.AddSingleton<TokenCredential>(sp =>
         {
             var logger = sp.GetRequiredService<ILoggerFactory>().CreateLogger("TokenCredential");
-            logger.LogInformation("Initializing DefaultAzureCredential for Managed Identity authentication");
+            logger.LogInformation("Initializing ManagedIdentityCredential - auto-detecting assigned identity");
 
-            var credential = new DefaultAzureCredential(new DefaultAzureCredentialOptions
-            {
-                ExcludeEnvironmentCredential = false,
-                ExcludeWorkloadIdentityCredential = false,
-                ExcludeManagedIdentityCredential = false,
-                ExcludeVisualStudioCredential = true,
-                ExcludeVisualStudioCodeCredential = true,
-                ExcludeAzureCliCredential = true,
-                ExcludeAzurePowerShellCredential = true,
-                ExcludeInteractiveBrowserCredential = true,
-                Diagnostics = { IsLoggingEnabled = true }
-            });
-
-            logger.LogInformation("DefaultAzureCredential initialized - will use assigned Managed Identity");
-            return credential;
+            return new ManagedIdentityCredential();
         });
 
         // Application services
@@ -68,3 +54,5 @@ var host = new HostBuilder()
     .Build();
 
 host.Run();
+
+
