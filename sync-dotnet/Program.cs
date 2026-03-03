@@ -78,6 +78,24 @@ try
     var identityService = scope.ServiceProvider.GetRequiredService<IdentityService>();
     identityService.LogIdentityDetails();
     
+    // Validate SharePoint access if configured
+    var configuration = scope.ServiceProvider.GetRequiredService<IConfiguration>();
+    var sharePointSiteUrl = configuration["SHAREPOINT_SITE_URL"];
+    
+    if (!string.IsNullOrEmpty(sharePointSiteUrl))
+    {
+        var (success, message) = await identityService.ValidateSharePointAccessAsync(sharePointSiteUrl);
+        if (!success)
+        {
+            logger.LogWarning("⚠️  SharePoint access validation failed: {Message}", message);
+            logger.LogWarning("    The application will start but may fail when trying to sync.");
+        }
+    }
+    else
+    {
+        logger.LogWarning("⚠️  SHAREPOINT_SITE_URL not configured - skipping access validation");
+    }
+    
     logger.LogInformation("========== IDENTITY CHECKS COMPLETED ==========");
 }
 catch (Exception ex)
