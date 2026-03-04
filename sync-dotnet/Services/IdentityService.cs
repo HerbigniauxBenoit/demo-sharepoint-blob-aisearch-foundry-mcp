@@ -35,7 +35,6 @@ public class IdentityService
             _logger.LogInformation("Target Site URL: {SiteUrl}", siteUrl);
 
             var token = await GetGraphTokenAsync(cancellationToken);
-
             var siteUri = new Uri(siteUrl);
             var relativePath = siteUri.AbsolutePath.TrimStart('/');
             var siteLookup = $"https://graph.microsoft.com/v1.0/sites/{siteUri.Host}:/{relativePath}";
@@ -64,18 +63,13 @@ public class IdentityService
             _logger.LogError("FAILED: Access denied to site. Status: {StatusCode}", response.StatusCode);
             _logger.LogError("Error details: {ErrorContent}", errorContent);
 
-            if (response.StatusCode is HttpStatusCode.NotFound or HttpStatusCode.Forbidden)
-            {
-                await LogExistingSitesAsync(client, token.Token, siteUri, cancellationToken);
-            }
-
             _logger.LogInformation("==================================================");
 
             return response.StatusCode switch
             {
-                HttpStatusCode.Forbidden => (false, "Access denied (403). The identity does not have permissions to access this site. Check Sites.Selected permissions."),
+                HttpStatusCode.Forbidden => (false, "Access denied (403). The identity does not have permissions to access this site. Check Sites.Selected grants on target site."),
                 HttpStatusCode.NotFound => (false, "Site not found (404). Verify the SharePoint site URL is correct."),
-                HttpStatusCode.Unauthorized => (false, "Unauthorized (401). The token may be invalid or the identity needs proper Graph API permissions."),
+                HttpStatusCode.Unauthorized => (false, "Unauthorized (401). The token may be invalid or Graph permissions are missing."),
                 _ => (false, $"Failed with status {response.StatusCode}: {errorContent}")
             };
         }
@@ -93,7 +87,7 @@ public class IdentityService
             _logger.LogInformation("========== MANAGED IDENTITY INFORMATION ==========");
 
             var configuredClientId = _configuration["AZURE_CLIENT_ID"];
-            if (!string.IsNullOrEmpty(configuredClientId))
+            if (!string.IsNullOrWhiteSpace(configuredClientId))
             {
                 _logger.LogInformation("Identity Type: User Assigned");
                 _logger.LogInformation("Configured Client ID: {ClientId}", configuredClientId);
@@ -104,14 +98,13 @@ public class IdentityService
             }
 
             var tenantId = _configuration["AZURE_TENANT_ID"];
-            if (!string.IsNullOrEmpty(tenantId))
+            if (!string.IsNullOrWhiteSpace(tenantId))
             {
                 _logger.LogInformation("Configured Tenant ID: {TenantId}", tenantId);
             }
 
             var token = await GetGraphTokenAsync(cancellationToken);
-            var handler = new JwtSecurityTokenHandler();
-            var jwtToken = handler.ReadJwtToken(token.Token);
+            var jwtToken = new JwtSecurityTokenHandler().ReadJwtToken(token.Token);
 
             var appId = jwtToken.Claims.FirstOrDefault(c => c.Type == "appid")?.Value;
             var oid = jwtToken.Claims.FirstOrDefault(c => c.Type == "oid")?.Value;
@@ -125,7 +118,7 @@ public class IdentityService
             _logger.LogInformation("Token App ID (appid): {AppId}", appId ?? "n/a");
             _logger.LogInformation("Principal Object ID (oid): {Oid}", oid ?? "n/a");
             _logger.LogInformation("Managed Identity Resource ID (xms_mirid): {ResourceId}", miResourceId ?? "n/a");
-            _logger.LogInformation("User Assigned Identity Name: {IdentityName}", userAssignedName ?? "n/a (claim xms_mirid absente ou non exploitable)");
+            _logger.LogInformation("User Assigned Identity Name: {IdentityName}", userAssignedName ?? "n/a (claim xms_mirid absente)");
 
             if (!string.IsNullOrWhiteSpace(configuredClientId) && !string.IsNullOrWhiteSpace(appId))
             {
@@ -133,12 +126,7 @@ public class IdentityService
                     string.Equals(configuredClientId, appId, StringComparison.OrdinalIgnoreCase));
             }
 
-            var roles = jwtToken.Claims
-                .Where(c => c.Type == "roles")
-                .Select(c => c.Value)
-                .Distinct(StringComparer.OrdinalIgnoreCase)
-                .ToList();
-
+            var roles = GetRoles(jwtToken);
             if (roles.Count > 0)
             {
                 _logger.LogInformation("Global Graph App Roles ({Count}): {Roles}", roles.Count, string.Join(", ", roles));
@@ -147,7 +135,7 @@ public class IdentityService
             else
             {
                 _logger.LogWarning("No Graph application roles found in token.");
-                _logger.LogWarning("Check that Graph app roles are assigned to the Managed Identity service principal and that token cache was refreshed.");
+                _logger.LogWarning("Check Graph app role assignments on the Managed Identity service principal and refresh token cache.");
             }
 
             var siteUrl = _configuration["SHAREPOINT_SITE_URL"];
@@ -169,11 +157,48 @@ public class IdentityService
         }
     }
 
+    public async Task LogCandidateSitesForTargetAsync(string siteUrl, CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            if (string.IsNullOrWhiteSpace(siteUrl))
+            {
+                _logger.LogWarning("No site URL provided for candidate site discovery.");
+                return;
+            }
+
+            var token = await GetGraphTokenAsync(cancellationToken);
+            var roles = GetRoles(new JwtSecurityTokenHandler().ReadJwtToken(token.Token));
+            var canListSites = roles.Contains("Sites.Read.All", StringComparer.OrdinalIgnoreCase)
+                               || roles.Contains("Sites.ReadWrite.All", StringComparer.OrdinalIgnoreCase);
+
+            if (!canListSites)
+            {
+                _logger.LogInformation("Skipping global site listing: token has no Sites.Read.All/Sites.ReadWrite.All (Sites.Selected only is expected)." );
+                return;
+            }
+
+            using var client = _httpClientFactory.CreateClient();
+            await LogExistingSitesAsync(client, token.Token, new Uri(siteUrl), cancellationToken);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Could not run candidate site discovery pre-check.");
+        }
+    }
+
     private async Task<AccessToken> GetGraphTokenAsync(CancellationToken cancellationToken)
     {
         var tokenRequestContext = new TokenRequestContext(new[] { "https://graph.microsoft.com/.default" });
         return await _tokenCredential.GetTokenAsync(tokenRequestContext, cancellationToken);
     }
+
+    private static List<string> GetRoles(JwtSecurityToken jwtToken) =>
+        jwtToken.Claims
+            .Where(c => c.Type == "roles")
+            .Select(c => c.Value)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
 
     private async Task LogTargetSitePermissionsAsync(string accessToken, string siteUrl, string? appId, CancellationToken cancellationToken)
     {
@@ -265,39 +290,17 @@ public class IdentityService
                 : "none found for this app (or not visible)");
     }
 
-    public async Task LogCandidateSitesForTargetAsync(string siteUrl, CancellationToken cancellationToken = default)
-    {
-        try
-        {
-            if (string.IsNullOrWhiteSpace(siteUrl))
-            {
-                _logger.LogWarning("No site URL provided for candidate site discovery.");
-                return;
-            }
-
-            var token = await GetGraphTokenAsync(cancellationToken);
-            using var client = _httpClientFactory.CreateClient();
-            await LogExistingSitesAsync(client, token.Token, new Uri(siteUrl), cancellationToken);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex, "Could not run candidate site discovery pre-check.");
-        }
-    }
-
     private async Task LogExistingSitesAsync(HttpClient client, string accessToken, Uri targetSiteUri, CancellationToken cancellationToken)
     {
         try
         {
-            _logger.LogWarning("Target site not found/forbidden. Listing candidate sites from Graph for hostname {Host}...", targetSiteUri.Host);
+            _logger.LogInformation("Listing candidate sites from Graph for hostname {Host}...", targetSiteUri.Host);
 
             var searchTerm = targetSiteUri.AbsolutePath.Split('/', StringSplitOptions.RemoveEmptyEntries).LastOrDefault();
             var candidateUrls = new[]
             {
                 "https://graph.microsoft.com/v1.0/sites?search=*",
-                string.IsNullOrWhiteSpace(searchTerm)
-                    ? null
-                    : $"https://graph.microsoft.com/v1.0/sites?search={Uri.EscapeDataString(searchTerm)}"
+                string.IsNullOrWhiteSpace(searchTerm) ? null : $"https://graph.microsoft.com/v1.0/sites?search={Uri.EscapeDataString(searchTerm)}"
             }.Where(u => !string.IsNullOrWhiteSpace(u)).Cast<string>();
 
             foreach (var url in candidateUrls)
@@ -334,8 +337,7 @@ public class IdentityService
                     .Take(30)
                     .ToList();
 
-                _logger.LogInformation("Candidate sites from query '{Url}' (filtered on host {Host}, count={Count}):", url, targetSiteUri.Host, rows.Count);
-
+                _logger.LogInformation("Candidate sites from query '{Url}' (host {Host}, count={Count}):", url, targetSiteUri.Host, rows.Count);
                 foreach (var row in rows)
                 {
                     _logger.LogInformation(" - Site: '{DisplayName}' | Url: {WebUrl} | Id: {Id}",
