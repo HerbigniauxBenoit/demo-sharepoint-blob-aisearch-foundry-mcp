@@ -67,14 +67,20 @@ public sealed class HealthCheckFunction
 
         try
         {
-            // Log identity details to console/logs
-            await _identityService.LogIdentityDetailsAsync(cancellationToken);
-
-            // Validate SharePoint access
             var sharePointSiteUrl = _configuration["SHAREPOINT_SITE_URL"];
             string? sharePointValidation = null;
             bool? sharePointAccess = null;
 
+            // 1) First step: list candidate sites in logs
+            if (!string.IsNullOrEmpty(sharePointSiteUrl))
+            {
+                await _identityService.LogCandidateSitesForTargetAsync(sharePointSiteUrl, cancellationToken);
+            }
+
+            // 2) Then log identity details
+            await _identityService.LogIdentityDetailsAsync(cancellationToken);
+
+            // 3) Then validate access to configured target site
             if (!string.IsNullOrEmpty(sharePointSiteUrl))
             {
                 var (success, message) = await _identityService.ValidateSharePointAccessAsync(sharePointSiteUrl, cancellationToken);
