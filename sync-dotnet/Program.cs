@@ -1,5 +1,4 @@
 using Azure.Core;
-using Azure.Identity;
 using Microsoft.Azure.Functions.Worker;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
@@ -33,26 +32,9 @@ var host = new HostBuilder()
         // Azure SDK clients
         services.AddHttpClient();
 
-        // Configure credential for authentication
+        services.AddSingleton<TokenCredentialFactory>();
         services.AddSingleton<TokenCredential>(sp =>
-        {
-            var logger = sp.GetRequiredService<ILoggerFactory>().CreateLogger("TokenCredential");
-            var configuration = sp.GetRequiredService<IConfiguration>();
-
-            // Pour User Assigned Managed Identity, récupérer le client ID depuis la configuration
-            var managedIdentityClientId = configuration["AZURE_CLIENT_ID"];
-
-            if (!string.IsNullOrEmpty(managedIdentityClientId))
-            {
-                logger.LogInformation("Initializing User Assigned ManagedIdentityCredential with client ID: {ClientId}", managedIdentityClientId);
-                return new ManagedIdentityCredential(managedIdentityClientId);
-            }
-            else
-            {
-                logger.LogInformation("Initializing System Assigned ManagedIdentityCredential - auto-detecting assigned identity");
-                return new ManagedIdentityCredential();
-            }
-        });
+            sp.GetRequiredService<TokenCredentialFactory>().Create());
 
         // Identity logging service
         services.AddSingleton<IdentityService>();
