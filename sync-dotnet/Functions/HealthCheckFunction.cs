@@ -190,7 +190,6 @@ public sealed class HealthCheckFunction
             };
 
             var httpResponse = req.CreateResponse(response.IsSuccessStatusCode ? HttpStatusCode.OK : HttpStatusCode.BadGateway);
-            httpResponse.Headers.Add("Content-Type", "application/json");
             await httpResponse.WriteAsJsonAsync(result, cancellationToken);
 
             _logger.LogInformation("========== GRAPH CHECK END (Status={Status}) ==========", response.StatusCode);
@@ -201,7 +200,6 @@ public sealed class HealthCheckFunction
             _logger.LogError(ex, "========== GRAPH CHECK END (ERROR) ==========");
 
             var response = req.CreateResponse(HttpStatusCode.InternalServerError);
-            response.Headers.Add("Content-Type", "application/json");
             await response.WriteAsJsonAsync(new
             {
                 status = "error",
