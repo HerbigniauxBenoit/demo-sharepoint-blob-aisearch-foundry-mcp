@@ -63,6 +63,12 @@ public class IdentityService
             var errorContent = await response.Content.ReadAsStringAsync(cancellationToken);
             _logger.LogError("FAILED: Access denied to site. Status: {StatusCode}", response.StatusCode);
             _logger.LogError("Error details: {ErrorContent}", errorContent);
+
+            if (response.StatusCode == System.Net.HttpStatusCode.NotFound)
+            {
+                await LogExistingSitesAsync(client, token.Token, siteUri, cancellationToken);
+            }
+
             _logger.LogInformation("==================================================");
 
             return response.StatusCode switch
@@ -77,6 +83,66 @@ public class IdentityService
         {
             _logger.LogError(ex, "EXCEPTION while validating SharePoint access");
             return (false, $"Exception: {ex.Message}");
+        }
+    }
+
+    private async Task LogExistingSitesAsync(HttpClient client, string accessToken, Uri targetSiteUri, CancellationToken cancellationToken)
+    {
+        try
+        {
+            _logger.LogWarning("Target site not found. Attempting to list candidate sites from Graph for hostname {Host}...", targetSiteUri.Host);
+
+            var searchTerm = targetSiteUri.AbsolutePath.Split('/', StringSplitOptions.RemoveEmptyEntries).LastOrDefault();
+            var candidateUrls = new List<string>
+            {
+                $"https://graph.microsoft.com/v1.0/sites?search=*",
+                string.IsNullOrWhiteSpace(searchTerm)
+                    ? string.Empty
+                    : $"https://graph.microsoft.com/v1.0/sites?search={Uri.EscapeDataString(searchTerm)}"
+            }.Where(u => !string.IsNullOrWhiteSpace(u)).ToList();
+
+            foreach (var url in candidateUrls)
+            {
+                using var req = new HttpRequestMessage(HttpMethod.Get, url);
+                req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", accessToken);
+                using var res = await client.SendAsync(req, cancellationToken);
+
+                if (!res.IsSuccessStatusCode)
+                {
+                    var body = await res.Content.ReadAsStringAsync(cancellationToken);
+                    _logger.LogWarning("Unable to list sites with '{Url}'. Status: {Status}. Body: {Body}", url, res.StatusCode, body);
+                    continue;
+                }
+
+                var payload = await res.Content.ReadAsStringAsync(cancellationToken);
+                using var doc = JsonDocument.Parse(payload);
+
+                if (!doc.RootElement.TryGetProperty("value", out var sites) || sites.GetArrayLength() == 0)
+                {
+                    _logger.LogInformation("No sites returned by query: {Url}", url);
+                    continue;
+                }
+
+                _logger.LogInformation("Candidate sites returned by query: {Url}", url);
+
+                foreach (var site in sites.EnumerateArray().Take(30))
+                {
+                    var id = site.TryGetProperty("id", out var idEl) ? idEl.GetString() : null;
+                    var displayName = site.TryGetProperty("displayName", out var dnEl) ? dnEl.GetString() : null;
+                    var webUrl = site.TryGetProperty("webUrl", out var wuEl) ? wuEl.GetString() : null;
+                    var hostMatch = !string.IsNullOrWhiteSpace(webUrl) && webUrl.Contains(targetSiteUri.Host, StringComparison.OrdinalIgnoreCase);
+
+                    _logger.LogInformation(" - Site: '{DisplayName}' | Url: {WebUrl} | Id: {Id} | HostMatch: {HostMatch}",
+                        displayName ?? "(no displayName)",
+                        webUrl ?? "(no webUrl)",
+                        id ?? "(no id)",
+                        hostMatch);
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Could not list candidate sites from Graph.");
         }
     }
 
