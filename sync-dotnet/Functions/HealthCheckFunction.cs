@@ -1,5 +1,4 @@
 using System.Net;
-using System.IdentityModel.Tokens.Jwt;
 using System.Net.Http.Headers;
 using System.Text.Json;
 using Azure.Core;
@@ -166,43 +165,10 @@ public sealed class HealthCheckFunction
     {
         try
         {
+            _logger.LogInformation("Trying Graph sites listing without role pre-check...");
+
             var tokenRequestContext = new TokenRequestContext(new[] { "https://graph.microsoft.com/.default" });
             var token = await _tokenCredential.GetTokenAsync(tokenRequestContext, cancellationToken);
-            var jwtToken = new JwtSecurityTokenHandler().ReadJwtToken(token.Token);
-
-            var roles = jwtToken.Claims
-                .Where(c => c.Type == "roles")
-                .Select(c => c.Value)
-                .Distinct(StringComparer.OrdinalIgnoreCase)
-                .ToList();
-
-            if (roles.Count == 0)
-            {
-                _logger.LogWarning("Graph token roles: none found (claim 'roles' is missing or empty).");
-            }
-            else
-            {
-                _logger.LogInformation("Graph token roles ({Count}): {Roles}", roles.Count, string.Join(", ", roles));
-            }
-
-            var hasSitesSelected = roles.Contains("Sites.Selected", StringComparer.OrdinalIgnoreCase);
-            var hasSitesReadAll = roles.Contains("Sites.Read.All", StringComparer.OrdinalIgnoreCase);
-            var hasSitesReadWriteAll = roles.Contains("Sites.ReadWrite.All", StringComparer.OrdinalIgnoreCase);
-
-            _logger.LogInformation(
-                "Role flags - Sites.Selected: {HasSitesSelected}, Sites.Read.All: {HasSitesReadAll}, Sites.ReadWrite.All: {HasSitesReadWriteAll}",
-                hasSitesSelected,
-                hasSitesReadAll,
-                hasSitesReadWriteAll);
-
-            var canListSites = hasSitesReadAll || hasSitesReadWriteAll;
-
-            if (!canListSites)
-            {
-                const string message = "Listing all sites requires Sites.Read.All or Sites.ReadWrite.All. With Sites.Selected only, global listing is not available.";
-                _logger.LogInformation("Sites listing skipped: {Message}", message);
-                return (false, message, Array.Empty<object>());
-            }
 
             using var client = _httpClientFactory.CreateClient();
             using var request = new HttpRequestMessage(HttpMethod.Get, "https://graph.microsoft.com/v1.0/sites?search=*");
