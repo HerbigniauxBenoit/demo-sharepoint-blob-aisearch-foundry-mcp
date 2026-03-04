@@ -73,7 +73,7 @@ public sealed class HealthCheckFunction
         [HttpTrigger(AuthorizationLevel.Function, "get", Route = "health/identity")] HttpRequestData req,
         CancellationToken cancellationToken)
     {
-        _logger.LogInformation("Identity check requested");
+        _logger.LogInformation("========== IDENTITY CHECK START ==========");
 
         try
         {
@@ -81,23 +81,36 @@ public sealed class HealthCheckFunction
             string? sharePointValidation = null;
             bool? sharePointAccess = null;
 
-            var (sitesListSuccess, sitesListMessage, accessibleSites) = await TryListAccessibleSitesAsync(cancellationToken);
+            _logger.LogInformation("Identity type configured: {IdentityType}",
+                !string.IsNullOrEmpty(_configuration["AZURE_CLIENT_ID"]) ? "UserAssigned" : "SystemAssigned");
+            _logger.LogInformation("Configured AZURE_CLIENT_ID: {ClientId}", _configuration["AZURE_CLIENT_ID"] ?? "(not set)");
+            _logger.LogInformation("Configured AZURE_TENANT_ID: {TenantId}", _configuration["AZURE_TENANT_ID"] ?? "(not set)");
+            _logger.LogInformation("Configured SHAREPOINT_SITE_URL: {SiteUrl}", sharePointSiteUrl ?? "(not set)");
 
-            // 1) First step: list candidate sites in logs
+            _logger.LogInformation("Step 1/3 - Listing sites accessible by current token...");
+            var (sitesListSuccess, sitesListMessage, accessibleSites) = await TryListAccessibleSitesAsync(cancellationToken);
+            _logger.LogInformation("Step 1/3 result - Success: {Success}, Message: {Message}, Returned sites: {Count}",
+                sitesListSuccess,
+                sitesListMessage,
+                accessibleSites.Count);
+
+            _logger.LogInformation("Step 2/3 - Logging managed identity and token details...");
+            await _identityService.LogIdentityDetailsAsync(cancellationToken);
+            _logger.LogInformation("Step 2/3 completed.");
+
+            _logger.LogInformation("Step 3/3 - Validating access to configured SharePoint site...");
             if (!string.IsNullOrEmpty(sharePointSiteUrl))
             {
                 await _identityService.LogCandidateSitesForTargetAsync(sharePointSiteUrl, cancellationToken);
-            }
 
-            // 2) Then log identity details
-            await _identityService.LogIdentityDetailsAsync(cancellationToken);
-
-            // 3) Then validate access to configured target site
-            if (!string.IsNullOrEmpty(sharePointSiteUrl))
-            {
                 var (success, message) = await _identityService.ValidateSharePointAccessAsync(sharePointSiteUrl, cancellationToken);
                 sharePointAccess = success;
                 sharePointValidation = message;
+                _logger.LogInformation("Step 3/3 result - AccessGranted: {AccessGranted}, Message: {Message}", success, message);
+            }
+            else
+            {
+                _logger.LogWarning("Step 3/3 skipped - SHAREPOINT_SITE_URL is not configured.");
             }
 
             var response = req.CreateResponse(HttpStatusCode.OK);
@@ -128,11 +141,12 @@ public sealed class HealthCheckFunction
             };
 
             await response.WriteAsJsonAsync(result, cancellationToken);
+            _logger.LogInformation("========== IDENTITY CHECK END (SUCCESS) ==========");
             return response;
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Identity check failed");
+            _logger.LogError(ex, "========== IDENTITY CHECK END (ERROR) ==========");
 
             var response = req.CreateResponse(HttpStatusCode.InternalServerError);
             response.Headers.Add("Content-Type", "application/json");
@@ -162,12 +176,31 @@ public sealed class HealthCheckFunction
                 .Distinct(StringComparer.OrdinalIgnoreCase)
                 .ToList();
 
-            var canListSites = roles.Contains("Sites.Read.All", StringComparer.OrdinalIgnoreCase)
-                               || roles.Contains("Sites.ReadWrite.All", StringComparer.OrdinalIgnoreCase);
+            if (roles.Count == 0)
+            {
+                _logger.LogWarning("Graph token roles: none found (claim 'roles' is missing or empty).");
+            }
+            else
+            {
+                _logger.LogInformation("Graph token roles ({Count}): {Roles}", roles.Count, string.Join(", ", roles));
+            }
+
+            var hasSitesSelected = roles.Contains("Sites.Selected", StringComparer.OrdinalIgnoreCase);
+            var hasSitesReadAll = roles.Contains("Sites.Read.All", StringComparer.OrdinalIgnoreCase);
+            var hasSitesReadWriteAll = roles.Contains("Sites.ReadWrite.All", StringComparer.OrdinalIgnoreCase);
+
+            _logger.LogInformation(
+                "Role flags - Sites.Selected: {HasSitesSelected}, Sites.Read.All: {HasSitesReadAll}, Sites.ReadWrite.All: {HasSitesReadWriteAll}",
+                hasSitesSelected,
+                hasSitesReadAll,
+                hasSitesReadWriteAll);
+
+            var canListSites = hasSitesReadAll || hasSitesReadWriteAll;
 
             if (!canListSites)
             {
                 const string message = "Listing all sites requires Sites.Read.All or Sites.ReadWrite.All. With Sites.Selected only, global listing is not available.";
+                _logger.LogInformation("Sites listing skipped: {Message}", message);
                 return (false, message, Array.Empty<object>());
             }
 
@@ -189,6 +222,7 @@ public sealed class HealthCheckFunction
             if (!doc.RootElement.TryGetProperty("value", out var sitesElement) || sitesElement.ValueKind != JsonValueKind.Array)
             {
                 const string message = "No site list returned by Graph.";
+                _logger.LogWarning(message);
                 return (true, message, Array.Empty<object>());
             }
 
@@ -204,6 +238,7 @@ public sealed class HealthCheckFunction
                 .Cast<object>()
                 .ToList();
 
+            _logger.LogInformation("Sites listing completed successfully. Count: {Count}", sites.Count);
             return (true, $"Listed {sites.Count} site(s).", sites);
         }
         catch (Exception ex)
