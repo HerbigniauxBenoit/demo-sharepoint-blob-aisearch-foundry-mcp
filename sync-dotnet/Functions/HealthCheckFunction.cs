@@ -161,6 +161,57 @@ public sealed class HealthCheckFunction
         }
     }
 
+    [Function("GraphCheck")]
+    public async Task<HttpResponseData> CheckGraphAsync(
+        [HttpTrigger(AuthorizationLevel.Function, "get", Route = "health/graph")] HttpRequestData req,
+        CancellationToken cancellationToken)
+    {
+        _logger.LogInformation("========== GRAPH CHECK START ==========");
+
+        try
+        {
+            var tokenRequestContext = new TokenRequestContext(new[] { "https://graph.microsoft.com/.default" });
+            var token = await _tokenCredential.GetTokenAsync(tokenRequestContext, cancellationToken);
+
+            using var client = _httpClientFactory.CreateClient();
+            using var request = new HttpRequestMessage(HttpMethod.Get, "https://graph.microsoft.com/v1.0/sites/root");
+            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token.Token);
+
+            using var response = await client.SendAsync(request, cancellationToken);
+            var payload = await response.Content.ReadAsStringAsync(cancellationToken);
+
+            var result = new
+            {
+                statusCode = (int)response.StatusCode,
+                reasonPhrase = response.ReasonPhrase,
+                success = response.IsSuccessStatusCode,
+                endpoint = "GET /v1.0/sites/root",
+                responseBody = payload
+            };
+
+            var httpResponse = req.CreateResponse(response.IsSuccessStatusCode ? HttpStatusCode.OK : HttpStatusCode.BadGateway);
+            httpResponse.Headers.Add("Content-Type", "application/json");
+            await httpResponse.WriteAsJsonAsync(result, cancellationToken);
+
+            _logger.LogInformation("========== GRAPH CHECK END (Status={Status}) ==========", response.StatusCode);
+            return httpResponse;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "========== GRAPH CHECK END (ERROR) ==========");
+
+            var response = req.CreateResponse(HttpStatusCode.InternalServerError);
+            response.Headers.Add("Content-Type", "application/json");
+            await response.WriteAsJsonAsync(new
+            {
+                status = "error",
+                error = ex.Message
+            }, cancellationToken);
+
+            return response;
+        }
+    }
+
     private async Task<(bool Success, string Message, IReadOnlyList<object> Sites)> TryListAccessibleSitesAsync(CancellationToken cancellationToken)
     {
         try
