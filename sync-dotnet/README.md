@@ -112,7 +112,7 @@ $FUNC = "<function-app-name>"
 az functionapp show -g $RG -n $FUNC --query "{name:name,defaultHostName:defaultHostName,state:state}" -o jsonc
 ```
 
-### 3. Variables utiles (si la lecture de config est autorisee)
+### 3. Variables utiles (si la lecture de config est autorisée)
 
 ```powershell
 az functionapp config appsettings list -g $RG -n $FUNC `
@@ -135,7 +135,7 @@ Invoke-RestMethod -Method Post `
 	-Body $body
 ```
 
-### 5. Capturer l'erreur detaillee (si echec)
+### 5. Capturer l'erreur détaillée (si échec)
 
 ```powershell
 try {
@@ -150,43 +150,46 @@ try {
 }
 ```
 
-### 6. Informations a transmettre au client
+### 6. Informations à transmettre au client
 
 - `Tenant ID` du contexte Azure courant
 - `Subscription ID`
-- URL SharePoint testee
+- URL SharePoint testée
 - Horodatage UTC de l'erreur
 - Code HTTP (`401`/`403`)
 - Message d'erreur Graph brut
 - `request-id` et `client-request-id` Graph
-- Claim token `tid` (si present dans les logs de la fonction)
-- Valeur `EXPECTED_TENANT_ID` ou `AZURE_TENANT_ID` (si definie)
+- Claim token `tid` (si présent dans les logs de la fonction)
+- Claim token `scp` et `roles` (si présents dans les logs de la fonction)
+- Valeur `EXPECTED_TENANT_ID` ou `AZURE_TENANT_ID` (si définie)
 
 ### 7. Template de message client (copier/coller)
 
 ```text
 Bonjour,
 
-Nous avons effectue un test de connectivite SharePoint via Azure Function (Managed Identity user-assigned).
+Nous avons effectué un test de connectivité SharePoint via Azure Function (Managed Identity user-assigned).
 
-- Site teste: <site-url>
-- Resultat: <HTTP 401/403>
+- Site testé: <site-url>
+- Résultat: <HTTP 401/403>
 - Horodatage UTC: <timestamp>
 - Tenant du token (tid): <token-tid>
+- Scopes du token (scp): <token-scopes>
+- Roles du token: <token-roles>
 - Tenant attendu (EXPECTED_TENANT_ID/AZURE_TENANT_ID): <expected-tenant-id>
 - request-id Graph: <request-id>
 - client-request-id Graph: <client-request-id>
 - Message brut Graph: <raw-error>
 
-Pouvez-vous verifier cote client:
-1. La concordance du tenant entre l'identite et le tenant SharePoint cible.
+Pouvez-vous vérifier côté client:
+1. La concordance du tenant entre l'identité et le tenant SharePoint cible.
 2. La permission Microsoft Graph application `Sites.Selected`.
-3. Le grant de cette application/identite sur le site SharePoint cible.
+3. Le grant de cette application/identité sur le site SharePoint cible.
 
 Merci.
 ```
 
-## Recuperer EXPECTED_TENANT_ID (AZ CLI)
+## Récupérer EXPECTED_TENANT_ID (AZ CLI)
 
 Si vous voulez uniquement lire la valeur depuis la Function App:
 
@@ -197,7 +200,7 @@ az functionapp config appsettings list `
 	--query "[?name=='EXPECTED_TENANT_ID'].value | [0]" -o tsv
 ```
 
-Fallback utilise par le code (`AZURE_TENANT_ID`) si `EXPECTED_TENANT_ID` est vide:
+Fallback utilisé par le code (`AZURE_TENANT_ID`) si `EXPECTED_TENANT_ID` est vide:
 
 ```powershell
 az functionapp config appsettings list `
@@ -215,8 +218,23 @@ az functionapp config appsettings list `
 	--query "[?name=='EXPECTED_TENANT_ID' || name=='AZURE_TENANT_ID'].{name:name,value:value}" -o table
 ```
 
-Si vous n'avez pas la permission de lire les app settings, recuperez au moins le tenant courant du contexte Azure:
+Si vous n'avez pas la permission de lire les app settings, récupérez au moins le tenant courant du contexte Azure:
 
 ```powershell
 az account show --query tenantId -o tsv
 ```
+
+
+# Log helper
+# Récupère les IDs nécessaires
+$managedIdentityObjectId = "OBJECT_ID_DE_TA_MANAGED_IDENTITY"  # Pas le Client ID !
+$graphAppId = "00000003-0000-0000-c000-000000000000"  # ID fixe de Microsoft Graph
+
+$graphSp = Get-MgServicePrincipal -Filter "appId eq '$graphAppId'"
+$role = $graphSp.AppRoles | Where-Object { $_.Value -eq "Sites.Read.All" }
+
+New-MgServicePrincipalAppRoleAssignment `
+    -ServicePrincipalId $managedIdentityObjectId `
+    -PrincipalId $managedIdentityObjectId `
+    -ResourceId $graphSp.Id `
+    -AppRoleId $role.Id
