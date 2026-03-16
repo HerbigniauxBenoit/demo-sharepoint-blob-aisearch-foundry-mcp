@@ -224,17 +224,26 @@ Si vous n'avez pas la permission de lire les app settings, récupérez au moins 
 az account show --query tenantId -o tsv
 ```
 
+# Site select sur le site 
+# 1. Récupérer l'Object ID de Microsoft Graph
+az ad sp show \
+  --id "00000003-0000-0000-c000-000000000000" \
+  --query "id" \
+  --output tsv
 
-# Log helper
-# Récupère les IDs nécessaires
-$managedIdentityObjectId = "OBJECT_ID_DE_TA_MANAGED_IDENTITY"  # Pas le Client ID !
-$graphAppId = "00000003-0000-0000-c000-000000000000"  # ID fixe de Microsoft Graph
+# 2. Récupérer l'ID du role Sites.Selected
+az ad sp show \
+  --id "00000003-0000-0000-c000-000000000000" \
+  --query "appRoles[?value=='Sites.Selected'].id" \
+  --output tsv
 
-$graphSp = Get-MgServicePrincipal -Filter "appId eq '$graphAppId'"
-$role = $graphSp.AppRoles | Where-Object { $_.Value -eq "Sites.Read.All" }
-
-New-MgServicePrincipalAppRoleAssignment `
-    -ServicePrincipalId $managedIdentityObjectId `
-    -PrincipalId $managedIdentityObjectId `
-    -ResourceId $graphSp.Id `
-    -AppRoleId $role.Id
+# 3. Assigner
+az rest \
+  --method POST \
+  --uri "https://graph.microsoft.com/v1.0/servicePrincipals/<OBJECT_ID_MSI>/appRoleAssignments" \
+  --headers "Content-Type=application/json" \
+  --body '{
+    "principalId": "<OBJECT_ID_MSI>",
+    "resourceId": "<OBJECT_ID_GRAPH_ETAPE_1>",
+    "appRoleId": "<ID_ROLE_ETAPE_2>"
+  }'
