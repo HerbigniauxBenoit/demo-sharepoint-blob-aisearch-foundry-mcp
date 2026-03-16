@@ -105,6 +105,7 @@ public class TestSharePointConnectionFunction
                 _logger.LogInformation("─────────────────────────────────────────────────────────────────");
 
                 AccessToken token;
+                string? tokenTenantId = null;
                 try
                 {
                     var stopwatch = System.Diagnostics.Stopwatch.StartNew();
@@ -123,6 +124,7 @@ public class TestSharePointConnectionFunction
                         if (jwtHandler.CanReadToken(token.Token))
                         {
                             var jwtToken = jwtHandler.ReadJwtToken(token.Token);
+                            tokenTenantId = jwtToken.Claims.FirstOrDefault(c => c.Type == "tid")?.Value;
                             _logger.LogInformation("  Token claims:");
                             foreach (var claim in jwtToken.Claims.Take(10)) // Log first 10 claims
                             {
@@ -149,58 +151,9 @@ public class TestSharePointConnectionFunction
                     };
                 }
 
-                // 3. Test Graph API connectivity
+                // 3. Resolve SharePoint Site
                 _logger.LogInformation("─────────────────────────────────────────────────────────────────");
-                _logger.LogInformation("STEP 3: Testing Microsoft Graph API connectivity");
-                _logger.LogInformation("─────────────────────────────────────────────────────────────────");
-
-                try
-                {
-                    using (var client = _httpClientFactory.CreateClient())
-                    {
-                        var graphMeUrl = "https://graph.microsoft.com/v1.0/me";
-                        _logger.LogInformation("Calling Graph API endpoint: {Endpoint}", graphMeUrl);
-
-                        using (var meRequest = new HttpRequestMessage(HttpMethod.Get, graphMeUrl))
-                        {
-                            meRequest.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token.Token);
-                            
-                            var stopwatch = System.Diagnostics.Stopwatch.StartNew();
-                            using (var meResponse = await client.SendAsync(meRequest, cancellationToken))
-                            {
-                                stopwatch.Stop();
-
-                                _logger.LogInformation("Response status code: {StatusCode}", (int)meResponse.StatusCode);
-                                _logger.LogInformation("Response time: {ElapsedMs}ms", stopwatch.ElapsedMilliseconds);
-
-                                if (meResponse.IsSuccessStatusCode)
-                                {
-                                    var meContent = await meResponse.Content.ReadAsStringAsync(cancellationToken);
-                                    using (var meDoc = JsonDocument.Parse(meContent))
-                                    {
-                                        var userPrincipalName = meDoc.RootElement.TryGetProperty("userPrincipalName", out var upnElement) 
-                                            ? upnElement.GetString() 
-                                            : "N/A";
-                                        _logger.LogInformation("✓ Successfully retrieved current user: {UserPrincipalName}", userPrincipalName);
-                                    }
-                                }
-                                else
-                                {
-                                    var errorContent = await meResponse.Content.ReadAsStringAsync(cancellationToken);
-                                    _logger.LogWarning("✗ Graph API call failed: {StatusCode} - {Content}", (int)meResponse.StatusCode, errorContent);
-                                }
-                            }
-                        }
-                    }
-                }
-                catch (Exception ex)
-                {
-                    _logger.LogError(ex, "✗ Exception during Graph API test");
-                }
-
-                // 4. Resolve SharePoint Site
-                _logger.LogInformation("─────────────────────────────────────────────────────────────────");
-                _logger.LogInformation("STEP 4: Resolving SharePoint Site");
+                _logger.LogInformation("STEP 3: Resolving SharePoint Site");
                 _logger.LogInformation("─────────────────────────────────────────────────────────────────");
 
                 try
@@ -208,6 +161,37 @@ public class TestSharePointConnectionFunction
                     var siteUri = new Uri(siteUrl);
                     var relativePath = siteUri.AbsolutePath.TrimStart('/');
                     var siteLookupUrl = $"https://graph.microsoft.com/v1.0/sites/{siteUri.Host}:/{Uri.EscapeDataString(relativePath)}";
+
+                    _logger.LogInformation("─────────────────────────────────────────────────────────────────");
+                    _logger.LogInformation("TENANT CHECK: token tenant vs expected tenant");
+                    _logger.LogInformation("─────────────────────────────────────────────────────────────────");
+                    var expectedTenantId = Environment.GetEnvironmentVariable("EXPECTED_TENANT_ID");
+                    if (string.IsNullOrWhiteSpace(expectedTenantId))
+                    {
+                        expectedTenantId = Environment.GetEnvironmentVariable("AZURE_TENANT_ID");
+                    }
+
+                    var sharePointTenantHint = siteUri.Host.Split('.')[0];
+                    _logger.LogInformation("Token tid claim: {TokenTenantId}", string.IsNullOrWhiteSpace(tokenTenantId) ? "N/A" : tokenTenantId);
+                    _logger.LogInformation("Expected tenant id (EXPECTED_TENANT_ID/AZURE_TENANT_ID): {ExpectedTenantId}", string.IsNullOrWhiteSpace(expectedTenantId) ? "N/A" : expectedTenantId);
+                    _logger.LogInformation("SharePoint host tenant hint: {SharePointTenantHint}", sharePointTenantHint);
+
+                    if (!string.IsNullOrWhiteSpace(expectedTenantId) && !string.IsNullOrWhiteSpace(tokenTenantId))
+                    {
+                        if (string.Equals(expectedTenantId, tokenTenantId, StringComparison.OrdinalIgnoreCase))
+                        {
+                            _logger.LogInformation("✓ Tenant check passed: token tid matches expected tenant id");
+                        }
+                        else
+                        {
+                            _logger.LogWarning("✗ Tenant check mismatch: token tid does not match expected tenant id");
+                            _logger.LogWarning("  This can cause 401/403 on Graph SharePoint calls if identity is from another tenant.");
+                        }
+                    }
+                    else
+                    {
+                        _logger.LogInformation("Tenant check is best-effort only. Set EXPECTED_TENANT_ID (or AZURE_TENANT_ID) to enable strict comparison.");
+                    }
 
                     _logger.LogInformation("Site Host: {Host}", siteUri.Host);
                     _logger.LogInformation("Site Path: {Path}", relativePath);
@@ -241,9 +225,9 @@ public class TestSharePointConnectionFunction
                                         _logger.LogInformation("  Display Name: {SiteName}", siteName);
                                         _logger.LogInformation("  Web URL: {WebUrl}", webUrl);
 
-                                        // 5. List drives in the site
+                                        // 4. List drives in the site
                                         _logger.LogInformation("─────────────────────────────────────────────────────────────────");
-                                        _logger.LogInformation("STEP 5: Listing drives in the SharePoint site");
+                                        _logger.LogInformation("STEP 4: Listing drives in the SharePoint site");
                                         _logger.LogInformation("─────────────────────────────────────────────────────────────────");
 
                                         var drivesUrl = $"https://graph.microsoft.com/v1.0/sites/{siteId}/drives";
@@ -295,7 +279,7 @@ public class TestSharePointConnectionFunction
                                             }
                                         }
 
-                                        // 6. Summary
+                                        // 5. Summary
                                         _logger.LogInformation("═══════════════════════════════════════════════════════════════════");
                                         _logger.LogInformation("✓ SUCCESS: SharePoint connection test completed");
                                         _logger.LogInformation("═══════════════════════════════════════════════════════════════════");
