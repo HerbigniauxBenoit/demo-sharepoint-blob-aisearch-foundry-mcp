@@ -281,6 +281,33 @@ public class TestSharePointConnectionFunction
 						_logger.LogError("FAILED: Site resolution failed: {StatusCode}", (int)siteResponse.StatusCode);
 						_logger.LogError("Error response: {ErrorContent}", errorContent);
 
+						_logger.LogInformation("─────────────────────────────────────────────────────────────────");
+						_logger.LogInformation("STEP 3B: Trying SharePoint Online REST fallback");
+						_logger.LogInformation("─────────────────────────────────────────────────────────────────");
+
+						var spoFallback = await TrySharePointOnlineFallbackAsync(
+							client,
+							tokenCredential,
+							siteUrl,
+							cancellationToken);
+
+						if (spoFallback.Success)
+						{
+							_logger.LogInformation("═══════════════════════════════════════════════════════════════════");
+							_logger.LogInformation("SUCCESS: SharePoint connection test completed via SPO fallback");
+							_logger.LogInformation("═══════════════════════════════════════════════════════════════════");
+
+							return new OkObjectResult(new
+							{
+								success = true,
+								connectionMode = "spo-fallback",
+								siteId = spoFallback.SiteId,
+								siteName = spoFallback.SiteName,
+								webUrl = spoFallback.WebUrl,
+								message = "SharePoint connection test successful via SPO fallback"
+							});
+						}
+
 						string errorMessage = siteResponse.StatusCode switch
 						{
 							HttpStatusCode.Forbidden => "Access denied (403). The identity does not have permissions to access this site. Ensure the user assigned identity has 'Sites.Selected' permissions granted on the target SharePoint site.",
@@ -298,7 +325,14 @@ public class TestSharePointConnectionFunction
 							success = false,
 							statusCode = (int)siteResponse.StatusCode,
 							error = errorMessage,
-							errorDetails = errorContent
+							errorDetails = errorContent,
+							spoFallback = new
+							{
+								success = false,
+								statusCode = spoFallback.StatusCode,
+								error = spoFallback.Error,
+								errorDetails = spoFallback.ErrorDetails
+							}
 						})
 						{
 							StatusCode = (int)siteResponse.StatusCode
@@ -348,4 +382,136 @@ public class TestSharePointConnectionFunction
 			};
 		}
 	}
+
+	private async Task<SpoFallbackResult> TrySharePointOnlineFallbackAsync(
+		HttpClient client,
+		TokenCredential tokenCredential,
+		string siteUrl,
+		CancellationToken cancellationToken)
+	{
+		try
+		{
+			var siteUri = new Uri(siteUrl);
+			var spoScope = $"https://{siteUri.Host}/.default";
+			_logger.LogInformation("SPO scope requested: {Scope}", spoScope);
+
+			var tokenStopwatch = System.Diagnostics.Stopwatch.StartNew();
+			var spoToken = await tokenCredential.GetTokenAsync(new TokenRequestContext([spoScope]), cancellationToken);
+			tokenStopwatch.Stop();
+
+			_logger.LogInformation("SUCCESS: SPO token acquired successfully");
+			_logger.LogInformation("SPO token acquisition time: {ElapsedMs}ms", tokenStopwatch.ElapsedMilliseconds);
+			_logger.LogInformation("SPO token expires at (UTC): {ExpiresOn:G}", spoToken.ExpiresOn);
+
+			var spoSiteUrl = $"{siteUrl.TrimEnd('/')}/_api/web?$select=Id,Title,Url";
+			_logger.LogInformation("SPO REST endpoint: {SpoSiteUrl}", spoSiteUrl);
+
+			using var spoRequest = new HttpRequestMessage(HttpMethod.Get, spoSiteUrl);
+			spoRequest.Headers.Authorization = new AuthenticationHeaderValue("Bearer", spoToken.Token);
+			spoRequest.Headers.TryAddWithoutValidation("Accept", "application/json;odata=nometadata");
+
+			var spoStopwatch = System.Diagnostics.Stopwatch.StartNew();
+			using var spoResponse = await client.SendAsync(spoRequest, cancellationToken);
+			spoStopwatch.Stop();
+
+			_logger.LogInformation("SPO response status code: {StatusCode}", (int)spoResponse.StatusCode);
+			_logger.LogInformation("SPO response time: {ElapsedMs}ms", spoStopwatch.ElapsedMilliseconds);
+
+			var spoContent = await spoResponse.Content.ReadAsStringAsync(cancellationToken);
+			if (!spoResponse.IsSuccessStatusCode)
+			{
+				_logger.LogError("FAILED: SPO site resolution failed: {StatusCode}", (int)spoResponse.StatusCode);
+				_logger.LogError("SPO error response: {ErrorContent}", spoContent);
+				return new SpoFallbackResult(
+					false,
+					(int)spoResponse.StatusCode,
+					null,
+					null,
+					null,
+					$"SPO fallback failed with status {(int)spoResponse.StatusCode}",
+					spoContent);
+			}
+
+			using var spoDoc = JsonDocument.Parse(spoContent);
+			var siteId = spoDoc.RootElement.TryGetProperty("Id", out var spoIdElement) ? spoIdElement.GetString() : "N/A";
+			var siteName = spoDoc.RootElement.TryGetProperty("Title", out var spoNameElement) ? spoNameElement.GetString() : "N/A";
+			var webUrl = spoDoc.RootElement.TryGetProperty("Url", out var spoUrlElement) ? spoUrlElement.GetString() : siteUrl;
+
+			_logger.LogInformation("SUCCESS: Site resolved successfully via SPO:");
+			_logger.LogInformation("Site ID: {SiteId}", siteId);
+			_logger.LogInformation("Display Name: {SiteName}", siteName);
+			_logger.LogInformation("Web URL: {WebUrl}", webUrl);
+
+			await LogDocumentLibrariesAsync(client, spoToken.Token, siteUrl, cancellationToken);
+
+			return new SpoFallbackResult(true, 200, siteId, siteName, webUrl, null, null);
+		}
+		catch (Exception ex)
+		{
+			_logger.LogError(ex, "FAILED: Exception during SPO fallback");
+			return new SpoFallbackResult(false, 500, null, null, null, ex.Message, ex.ToString());
+		}
+	}
+
+	private async Task LogDocumentLibrariesAsync(
+		HttpClient client,
+		string accessToken,
+		string siteUrl,
+		CancellationToken cancellationToken)
+	{
+		_logger.LogInformation("─────────────────────────────────────────────────────────────────");
+		_logger.LogInformation("STEP 4: Listing document libraries via SPO");
+		_logger.LogInformation("─────────────────────────────────────────────────────────────────");
+
+		var librariesUrl = $"{siteUrl.TrimEnd('/')}/_api/web/lists?$select=Id,Title,BaseTemplate,Hidden,RootFolder/ServerRelativeUrl&$expand=RootFolder&$filter=BaseTemplate eq 101 and Hidden eq false";
+		_logger.LogInformation("SPO libraries endpoint: {LibrariesUrl}", librariesUrl);
+
+		using var librariesRequest = new HttpRequestMessage(HttpMethod.Get, librariesUrl);
+		librariesRequest.Headers.Authorization = new AuthenticationHeaderValue("Bearer", accessToken);
+		librariesRequest.Headers.TryAddWithoutValidation("Accept", "application/json;odata=nometadata");
+
+		var stopwatch = System.Diagnostics.Stopwatch.StartNew();
+		using var librariesResponse = await client.SendAsync(librariesRequest, cancellationToken);
+		stopwatch.Stop();
+
+		_logger.LogInformation("SPO libraries response status code: {StatusCode}", (int)librariesResponse.StatusCode);
+		_logger.LogInformation("SPO libraries response time: {ElapsedMs}ms", stopwatch.ElapsedMilliseconds);
+
+		if (!librariesResponse.IsSuccessStatusCode)
+		{
+			var librariesErrorContent = await librariesResponse.Content.ReadAsStringAsync(cancellationToken);
+			_logger.LogError("FAILED: Failed to list document libraries via SPO: {StatusCode} - {Content}", (int)librariesResponse.StatusCode, librariesErrorContent);
+			return;
+		}
+
+		var librariesContent = await librariesResponse.Content.ReadAsStringAsync(cancellationToken);
+		using var librariesDoc = JsonDocument.Parse(librariesContent);
+		var libraries = librariesDoc.RootElement.GetProperty("value").EnumerateArray().ToList();
+		_logger.LogInformation("SUCCESS: Found {LibraryCount} document library/libraries via SPO:", libraries.Count);
+
+		int libraryIndex = 1;
+		foreach (var library in libraries)
+		{
+			var libraryId = library.TryGetProperty("Id", out var libraryIdElement) ? libraryIdElement.GetString() : "N/A";
+			var libraryName = library.TryGetProperty("Title", out var libraryNameElement) ? libraryNameElement.GetString() : "N/A";
+			var libraryRoot = library.TryGetProperty("RootFolder", out var rootFolderElement)
+				&& rootFolderElement.TryGetProperty("ServerRelativeUrl", out var rootUrlElement)
+					? rootUrlElement.GetString()
+					: "N/A";
+
+			_logger.LogInformation("Library {Index}:", libraryIndex++);
+			_logger.LogInformation("- ID: {LibraryId}", libraryId);
+			_logger.LogInformation("- Name: {LibraryName}", libraryName);
+			_logger.LogInformation("- RootFolder: {LibraryRoot}", libraryRoot);
+		}
+	}
+
+	private sealed record SpoFallbackResult(
+		bool Success,
+		int StatusCode,
+		string? SiteId,
+		string? SiteName,
+		string? WebUrl,
+		string? Error,
+		string? ErrorDetails);
 }
