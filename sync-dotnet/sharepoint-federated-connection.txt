@@ -1,0 +1,66 @@
+SharePointFederatedConnection
+
+But du endpoint
+Ce endpoint teste une connexion SharePoint Online avec le flux suivant :
+1. La User-Assigned Managed Identity demande un token MSI sur api://AzureADTokenExchange/.default
+2. Ce token MSI est reutilise comme assertion pour l'App Registration
+3. L'App Registration demande un token cible pour https://<SHAREPOINT_TENANT>/.default
+4. La function appelle Microsoft Graph pour resoudre le site SharePoint cible
+
+Route HTTP
+GET /api/sharepoint/federated-connection
+
+Variables obligatoires
+MANAGED_IDENTITY_CLIENT_ID
+- Client ID de la User-Assigned Managed Identity attachee a la Function App
+
+APP_REGISTRATION_CLIENT_ID
+- Client ID de l'App Registration utilisee pour l'echange federated credential
+
+AZURE_TENANT_ID
+- Tenant ID Entra ID dans lequel existent l'App Registration et la federated credential
+
+SHAREPOINT_TENANT
+- Hostname SharePoint, exemple : contoso.sharepoint.com
+
+SHAREPOINT_SITE_PATH
+- Chemin du site SharePoint, exemple : sites/MonSite
+- Ne pas mettre le hostname ici
+
+Ou trouver ces variables
+Local
+- Fichier : sync-dotnet/local.settings.json
+- Section : Values
+
+Azure Portal
+- Function App
+- Settings
+- Environment variables ou Configuration selon l'ecran
+
+Azure CLI
+- az functionapp config appsettings list --name <FUNCTION_APP_NAME> --resource-group <RESOURCE_GROUP>
+
+Ce qu'il faut configurer pour que ca marche
+1. Assigner la User-Assigned Managed Identity a la Function App
+2. Creer une Federated Credential sur l'App Registration qui fait confiance a cette managed identity
+3. Verifier que AZURE_TENANT_ID correspond bien au tenant de l'App Registration
+4. Verifier que SHAREPOINT_TENANT et SHAREPOINT_SITE_PATH pointent vers le bon site SharePoint
+5. Verifier que l'identite applicative a le droit d'acceder au site SharePoint cible
+
+Resultat attendu si tout fonctionne
+- La function obtient un token MSI
+- La function obtient un token SharePoint via ClientAssertionCredential
+- Microsoft Graph retourne le site SharePoint avec son DisplayName et son ID
+
+Resultat attendu si ca echoue
+- Erreur de variable manquante : une des variables obligatoires n'est pas definie
+- Erreur Graph : le site n'existe pas, le tenant est incorrect, ou les droits ne sont pas suffisants
+- Erreur d'auth federated : la managed identity, l'app registration ou la federated credential ne sont pas correctement alignees
+
+Logs actuellement gardes
+- Debut d'appel du endpoint
+- Validation des variables
+- Acquisition du token MSI
+- Acquisition du token SharePoint
+- Resolution du site SharePoint
+- Erreur Graph ou erreur generique
