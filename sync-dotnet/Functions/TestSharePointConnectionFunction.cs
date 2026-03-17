@@ -7,22 +7,27 @@ using Azure.Identity;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Azure.Functions.Worker;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 using Microsoft.Graph;
 using Microsoft.Kiota.Abstractions;
+using SharePointSync.Functions.Services;
 
 namespace SharePointSync.Functions.Functions;
 
 public class TestSharePointConnectionFunction
 {
     private readonly IHttpClientFactory _httpClientFactory;
+    private readonly IConfiguration _configuration;
     private readonly ILogger<TestSharePointConnectionFunction> _logger;
 
     public TestSharePointConnectionFunction(
         IHttpClientFactory httpClientFactory,
+        IConfiguration configuration,
         ILogger<TestSharePointConnectionFunction> logger)
     {
         _httpClientFactory = httpClientFactory;
+        _configuration = configuration;
         _logger = logger;
     }
 
@@ -400,16 +405,16 @@ public class TestSharePointConnectionFunction
         _logger.LogInformation("STEP 5: Federated Credential auth (MSI -> App Registration -> SharePoint/Graph)");
         _logger.LogInformation("─────────────────────────────────────────────────────────────────");
 
-        var managedIdentityClientId = Environment.GetEnvironmentVariable("MANAGED_IDENTITY_CLIENT_ID");
-        var appRegistrationClientId = Environment.GetEnvironmentVariable("APP_REGISTRATION_CLIENT_ID");
-        var tenantId = Environment.GetEnvironmentVariable("AZURE_TENANT_ID");
+        var managedIdentityClientId = ReadSetting("Azure:MsiClientId", "AZURE_MSI_CLIENT_ID", "MANAGED_IDENTITY_CLIENT_ID");
+        var appRegistrationClientId = ReadSetting("Azure:AppRegistrationClientId", "AZURE_APP_REGISTRATION_CLIENT_ID", "APP_REGISTRATION_CLIENT_ID");
+        var tenantId = ReadSetting("Azure:TenantId", "AZURE_TENANT_ID");
         var sharePointTenant = Environment.GetEnvironmentVariable("SHAREPOINT_TENANT");
         var sharePointSitePath = Environment.GetEnvironmentVariable("SHAREPOINT_SITE_PATH");
 
         _logger.LogInformation("STEP 5.1: Input parameters and environment configuration");
-        _logger.LogInformation("MANAGED_IDENTITY_CLIENT_ID: {ManagedIdentityClientId}", string.IsNullOrWhiteSpace(managedIdentityClientId) ? "<missing>" : managedIdentityClientId);
-        _logger.LogInformation("APP_REGISTRATION_CLIENT_ID: {AppRegistrationClientId}", string.IsNullOrWhiteSpace(appRegistrationClientId) ? "<missing>" : appRegistrationClientId);
-        _logger.LogInformation("AZURE_TENANT_ID: {TenantId}", string.IsNullOrWhiteSpace(tenantId) ? "<missing>" : tenantId);
+        _logger.LogInformation("Azure:TenantId / AZURE_TENANT_ID: {TenantId}", string.IsNullOrWhiteSpace(tenantId) ? "<missing>" : tenantId);
+        _logger.LogInformation("Azure:AppRegistrationClientId: {AppRegistrationClientId}", string.IsNullOrWhiteSpace(appRegistrationClientId) ? "<missing>" : appRegistrationClientId);
+        _logger.LogInformation("Azure:MsiClientId (optional): {ManagedIdentityClientId}", string.IsNullOrWhiteSpace(managedIdentityClientId) ? "<system-assigned>" : managedIdentityClientId);
         _logger.LogInformation("SHAREPOINT_TENANT: {SharePointTenant}", string.IsNullOrWhiteSpace(sharePointTenant) ? "<missing>" : sharePointTenant);
         _logger.LogInformation("SHAREPOINT_SITE_PATH: {SharePointSitePath}", string.IsNullOrWhiteSpace(sharePointSitePath) ? "<missing>" : sharePointSitePath);
 
@@ -422,19 +427,14 @@ public class TestSharePointConnectionFunction
         }
 
         var missingVariables = new List<string>();
-        if (string.IsNullOrWhiteSpace(managedIdentityClientId))
-        {
-            missingVariables.Add("MANAGED_IDENTITY_CLIENT_ID");
-        }
-
         if (string.IsNullOrWhiteSpace(appRegistrationClientId))
         {
-            missingVariables.Add("APP_REGISTRATION_CLIENT_ID");
+            missingVariables.Add("Azure:AppRegistrationClientId (or AZURE_APP_REGISTRATION_CLIENT_ID / APP_REGISTRATION_CLIENT_ID)");
         }
 
         if (string.IsNullOrWhiteSpace(tenantId))
         {
-            missingVariables.Add("AZURE_TENANT_ID");
+            missingVariables.Add("Azure:TenantId (or AZURE_TENANT_ID)");
         }
 
         if (string.IsNullOrWhiteSpace(sharePointTenant))
@@ -454,71 +454,21 @@ public class TestSharePointConnectionFunction
             return;
         }
 
-        var tokenExchangeScope = "api://AzureADTokenExchange/.default";
         var sharePointScope = $"https://{sharePointTenant}/.default";
         var graphScope = "https://graph.microsoft.com/.default";
         var normalizedSitePath = sharePointSitePath!.Trim('/');
         var graphSiteIdentifier = $"{sharePointTenant}:/{normalizedSitePath}";
 
-        _logger.LogInformation("STEP 5.2: MSI token request for token exchange scope");
-        _logger.LogInformation("Requested scope: {TokenExchangeScope}", tokenExchangeScope);
+        var federatedCredential = new FederatedMsiCredential(
+            tenantId!,
+            appRegistrationClientId!,
+            managedIdentityClientId,
+            _logger);
 
-        var managedIdentityCredential = new ManagedIdentityCredential(managedIdentityClientId);
-        AccessToken msiToken;
-
-        try
-        {
-            var tokenStopwatch = System.Diagnostics.Stopwatch.StartNew();
-            msiToken = await managedIdentityCredential.GetTokenAsync(
-                new TokenRequestContext([tokenExchangeScope]),
-                cancellationToken);
-            tokenStopwatch.Stop();
-
-            _logger.LogInformation("✓ MSI token acquired successfully");
-            _logger.LogInformation("MSI token acquisition time: {ElapsedMs}ms", tokenStopwatch.ElapsedMilliseconds);
-            _logger.LogInformation("MSI token expires at (UTC): {ExpiresOn:G}", msiToken.ExpiresOn);
-            LogTokenClaims("MSI token", msiToken.Token, ["aud", "iss", "sub", "appid", "azp", "tid"]);
-        }
-        catch (Exception ex)
-        {
-            LogDetailedError("✗ Failed to acquire MSI token for token exchange", ex);
-            _logger.LogInformation("─────────────────────────────────────────────────────────────────");
-            return;
-        }
-
-        var assertionCallbackInvocations = 0;
-        var cachedAssertionToken = msiToken;
-
-        async Task<string> GetManagedIdentityAssertionAsync(CancellationToken assertionCancellationToken)
-        {
-            assertionCallbackInvocations++;
-            _logger.LogInformation("STEP 5.3: Client assertion callback invocation #{Invocation}", assertionCallbackInvocations);
-
-            if (cachedAssertionToken.ExpiresOn <= DateTimeOffset.UtcNow.AddMinutes(5))
-            {
-                _logger.LogInformation("Cached MSI assertion token expires soon; requesting a fresh MSI token");
-                cachedAssertionToken = await managedIdentityCredential.GetTokenAsync(
-                    new TokenRequestContext([tokenExchangeScope]),
-                    assertionCancellationToken);
-                _logger.LogInformation("✓ Refreshed MSI assertion token. New expiry (UTC): {ExpiresOn:G}", cachedAssertionToken.ExpiresOn);
-                LogTokenClaims("Refreshed MSI token", cachedAssertionToken.Token, ["aud", "iss", "sub", "appid", "azp", "tid"]);
-            }
-            else
-            {
-                _logger.LogInformation("Reusing cached MSI assertion token. Expiry (UTC): {ExpiresOn:G}", cachedAssertionToken.ExpiresOn);
-            }
-
-            return cachedAssertionToken.Token;
-        }
-
-        var clientAssertionCredential = new ClientAssertionCredential(
-            tenantId,
-            appRegistrationClientId,
-            GetManagedIdentityAssertionAsync);
-
-        _logger.LogInformation("STEP 5.4: ClientAssertionCredential ready for App Registration federation");
+        _logger.LogInformation("STEP 5.2: FederatedMsiCredential ready (MSI assertion scope: api://AzureADTokenExchange/.default)");
         _logger.LogInformation("Tenant ID: {TenantId}", tenantId);
         _logger.LogInformation("App Registration Client ID: {AppRegistrationClientId}", appRegistrationClientId);
+        _logger.LogInformation("Managed Identity mode: {IdentityMode}", string.IsNullOrWhiteSpace(managedIdentityClientId) ? "system-assigned" : "user-assigned");
         _logger.LogInformation("SharePoint scope: {SharePointScope}", sharePointScope);
         _logger.LogInformation("Graph scope for validation: {GraphScope}", graphScope);
 
@@ -526,7 +476,7 @@ public class TestSharePointConnectionFunction
         try
         {
             var sharePointStopwatch = System.Diagnostics.Stopwatch.StartNew();
-            sharePointToken = await clientAssertionCredential.GetTokenAsync(
+            sharePointToken = await federatedCredential.GetTokenAsync(
                 new TokenRequestContext([sharePointScope]),
                 cancellationToken);
             sharePointStopwatch.Stop();
@@ -535,6 +485,12 @@ public class TestSharePointConnectionFunction
             _logger.LogInformation("SharePoint token acquisition time: {ElapsedMs}ms", sharePointStopwatch.ElapsedMilliseconds);
             _logger.LogInformation("SharePoint token expires at (UTC): {ExpiresOn:G}", sharePointToken.ExpiresOn);
             LogTokenClaims("Final SharePoint token", sharePointToken.Token, ["aud", "roles", "appid", "azp", "tid"]);
+        }
+        catch (AuthenticationFailedException ex)
+        {
+            _logger.LogError(ex, "✗ Federated authentication failed while acquiring SharePoint token: {Reason}", ex.Message);
+            _logger.LogInformation("─────────────────────────────────────────────────────────────────");
+            return;
         }
         catch (Exception ex)
         {
@@ -550,7 +506,7 @@ public class TestSharePointConnectionFunction
             _logger.LogInformation("Graph validation note: Graph requires a Graph audience token, so the SDK will request {GraphScope} using the same federated credential.", graphScope);
 
             var graphTokenStopwatch = System.Diagnostics.Stopwatch.StartNew();
-            var graphToken = await clientAssertionCredential.GetTokenAsync(
+            var graphToken = await federatedCredential.GetTokenAsync(
                 new TokenRequestContext([graphScope]),
                 cancellationToken);
             graphTokenStopwatch.Stop();
@@ -560,7 +516,7 @@ public class TestSharePointConnectionFunction
             _logger.LogInformation("Graph token expires at (UTC): {ExpiresOn:G}", graphToken.ExpiresOn);
             LogTokenClaims("Graph validation token", graphToken.Token, ["aud", "roles", "appid", "azp", "tid"]);
 
-            var graphClient = new GraphServiceClient(clientAssertionCredential, [graphScope]);
+            var graphClient = new GraphServiceClient(federatedCredential, [graphScope]);
             var requestStopwatch = System.Diagnostics.Stopwatch.StartNew();
             var site = await graphClient.Sites[graphSiteIdentifier].GetAsync(cancellationToken: cancellationToken);
             requestStopwatch.Stop();
@@ -590,6 +546,26 @@ public class TestSharePointConnectionFunction
         }
 
         _logger.LogInformation("─────────────────────────────────────────────────────────────────");
+    }
+
+    private string? ReadSetting(string configurationKey, params string[] environmentFallbackKeys)
+    {
+        var value = _configuration[configurationKey];
+        if (!string.IsNullOrWhiteSpace(value))
+        {
+            return value;
+        }
+
+        foreach (var envKey in environmentFallbackKeys)
+        {
+            value = Environment.GetEnvironmentVariable(envKey);
+            if (!string.IsNullOrWhiteSpace(value))
+            {
+                return value;
+            }
+        }
+
+        return null;
     }
 
     private async Task<SpoFallbackResult> TrySharePointOnlineFallbackAsync(
