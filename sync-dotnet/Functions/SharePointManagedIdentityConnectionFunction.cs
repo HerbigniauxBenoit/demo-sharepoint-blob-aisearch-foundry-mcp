@@ -1,4 +1,6 @@
 using System.Net;
+using System.IdentityModel.Tokens.Jwt;
+using Azure.Core;
 using Azure.Identity;
 using Microsoft.Azure.Functions.Worker;
 using Microsoft.Azure.Functions.Worker.Http;
@@ -31,6 +33,12 @@ public sealed class SharePointManagedIdentityConnectionFunction
             LogStepStart(2, "Authentification directe avec la Managed Identity");
             var managedIdentityCredential = new ManagedIdentityCredential(settings.ManagedIdentityClientId);
             _logger.LogInformation("Requested Graph scope: {Scope}", GraphScope);
+
+            var token = await managedIdentityCredential.GetTokenAsync(
+                new TokenRequestContext([GraphScope]),
+                cancellationToken);
+
+            LogTokenScopesAndRoles(token.Token);
 
             var graphClient = new GraphServiceClient(managedIdentityCredential, [GraphScope]);
             var siteIdentifier = $"{settings.SharePointTenant}:/{settings.SharePointSitePath}";
@@ -173,6 +181,35 @@ public sealed class SharePointManagedIdentityConnectionFunction
     private static string DescribePresence(string? value)
     {
         return string.IsNullOrWhiteSpace(value) ? "missing" : "set";
+    }
+
+    private void LogTokenScopesAndRoles(string jwt)
+    {
+        var handler = new JwtSecurityTokenHandler();
+        if (!handler.CanReadToken(jwt))
+        {
+            _logger.LogWarning("Unable to decode MSI access token.");
+            return;
+        }
+
+        var token = handler.ReadJwtToken(jwt);
+        var scopes = token.Claims
+            .Where(c => string.Equals(c.Type, "scp", StringComparison.OrdinalIgnoreCase))
+            .Select(c => c.Value)
+            .ToList();
+
+        var roles = token.Claims
+            .Where(c => string.Equals(c.Type, "roles", StringComparison.OrdinalIgnoreCase))
+            .Select(c => c.Value)
+            .ToList();
+
+        _logger.LogInformation(
+            "MSI token scp: {Scopes}",
+            scopes.Count > 0 ? string.Join(", ", scopes) : "(missing)");
+
+        _logger.LogInformation(
+            "MSI token roles: {Roles}",
+            roles.Count > 0 ? string.Join(", ", roles) : "(missing)");
     }
 
     private sealed record Settings(
