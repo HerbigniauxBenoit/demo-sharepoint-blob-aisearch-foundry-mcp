@@ -1,6 +1,4 @@
-using System.IdentityModel.Tokens.Jwt;
 using System.Net;
-using Azure.Core;
 using Azure.Identity;
 using Microsoft.Azure.Functions.Worker;
 using Microsoft.Azure.Functions.Worker.Http;
@@ -10,71 +8,44 @@ using Microsoft.Graph.Models.ODataErrors;
 
 namespace SharePointSync.Functions;
 
-public sealed class SharePointFederatedConnectionFunction
+public sealed class SharePointManagedIdentityConnectionFunction
 {
-    private const string TokenExchangeScope = "api://AzureADTokenExchange/.default";
     private const string GraphScope = "https://graph.microsoft.com/.default";
-    private readonly ILogger<SharePointFederatedConnectionFunction> _logger;
+    private readonly ILogger<SharePointManagedIdentityConnectionFunction> _logger;
 
-    public SharePointFederatedConnectionFunction(ILogger<SharePointFederatedConnectionFunction> logger)
+    public SharePointManagedIdentityConnectionFunction(ILogger<SharePointManagedIdentityConnectionFunction> logger)
     {
         _logger = logger;
     }
 
-    [Function("SharePointFederatedConnection")]
+    [Function("SharePointManagedIdentityConnection")]
     public async Task<HttpResponseData> RunAsync(
-        [HttpTrigger(AuthorizationLevel.Function, "get", Route = "sharepoint/federated-connection")] HttpRequestData req,
+        [HttpTrigger(AuthorizationLevel.Function, "get", Route = "sharepoint/msi-direct-connection")] HttpRequestData req,
         CancellationToken cancellationToken)
     {
         try
         {
-            _logger.LogInformation("SharePointFederatedConnection started: {Method} /api/sharepoint/federated-connection", req.Method);
+            _logger.LogInformation("SharePointManagedIdentityConnection started: {Method} /api/sharepoint/msi-direct-connection", req.Method);
             var settings = ReadAndValidateSettings();
 
-            LogStepStart(2, "Obtention du token MSI");
+            LogStepStart(2, "Authentification directe avec la Managed Identity");
             var managedIdentityCredential = new ManagedIdentityCredential(settings.ManagedIdentityClientId);
-            var msiToken = await managedIdentityCredential.GetTokenAsync(
-                new TokenRequestContext([TokenExchangeScope]),
-                cancellationToken);
+            _logger.LogInformation("Requested Graph scope: {Scope}", GraphScope);
 
-            _logger.LogInformation("✓ MSI token acquired for scope {Scope}", TokenExchangeScope);
-            LogJwtClaims("MSI token", msiToken.Token, ["aud", "appid", "azp", "oid", "sub", "xms_mirid"]);
-            LogStepEnd(2, "Obtention du token MSI");
-
-            LogStepStart(3, "Echange du token MSI via ClientAssertionCredential");
-            var sharePointScope = $"https://{settings.SharePointTenant}/.default";
-            _logger.LogInformation("Requested SharePoint scope: {Scope}", sharePointScope);
-
-            var clientAssertionCredential = new ClientAssertionCredential(
-                settings.TenantId,
-                settings.AppRegistrationClientId,
-                _ => Task.FromResult(msiToken.Token));
-
-            var sharePointToken = await clientAssertionCredential.GetTokenAsync(
-                new TokenRequestContext([sharePointScope]),
-                cancellationToken);
-
-            _logger.LogInformation("✓ SharePoint token acquired for scope {Scope}", sharePointScope);
-            LogJwtClaims("SharePoint token", sharePointToken.Token, ["aud", "roles", "appid", "azp", "oid", "tid"]);
-            LogStepEnd(3, "Echange du token MSI via ClientAssertionCredential");
-
-            LogStepStart(4, "Appel SharePoint via Microsoft Graph");
+            var graphClient = new GraphServiceClient(managedIdentityCredential, [GraphScope]);
             var siteIdentifier = $"{settings.SharePointTenant}:/{settings.SharePointSitePath}";
-            _logger.LogInformation("Graph scope: {Scope}", GraphScope);
             _logger.LogInformation("Graph site identifier: {SiteIdentifier}", siteIdentifier);
 
-            var graphClient = new GraphServiceClient(clientAssertionCredential, [GraphScope]);
             var site = await graphClient.Sites[siteIdentifier].GetAsync(cancellationToken: cancellationToken);
 
-            _logger.LogInformation("✓ SharePoint site resolved: {DisplayName} ({SiteId})", site?.DisplayName ?? "(null)", site?.Id ?? "(null)");
-            LogStepEnd(4, "Appel SharePoint via Microsoft Graph");
+            _logger.LogInformation("✓ SharePoint site resolved with direct MSI: {DisplayName} ({SiteId})", site?.DisplayName ?? "(null)", site?.Id ?? "(null)");
+            LogStepEnd(2, "Authentification directe avec la Managed Identity");
 
             var response = req.CreateResponse(HttpStatusCode.OK);
             await response.WriteAsJsonAsync(new
             {
                 success = true,
-                authentication = "federated-credential",
-                managedIdentity = "user-assigned",
+                authentication = "managed-identity-direct",
                 site = new
                 {
                     id = site?.Id,
@@ -97,7 +68,7 @@ public sealed class SharePointFederatedConnectionFunction
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "✗ SharePointFederatedConnection failed: {Message}", ex.Message);
+            _logger.LogError(ex, "✗ SharePointManagedIdentityConnection failed: {Message}", ex.Message);
             if (ex.InnerException is not null)
             {
                 _logger.LogError("Inner error: {InnerError}", ex.InnerException.Message);
@@ -112,33 +83,23 @@ public sealed class SharePointFederatedConnectionFunction
         LogStepStart(1, "Lecture et validation des variables d'environnement");
 
         var managedIdentityClientId = Environment.GetEnvironmentVariable("MANAGED_IDENTITY_CLIENT_ID");
-        var appRegistrationClientId = Environment.GetEnvironmentVariable("APP_REGISTRATION_CLIENT_ID");
         var tenantId = Environment.GetEnvironmentVariable("AZURE_TENANT_ID");
         var sharePointTenant = Environment.GetEnvironmentVariable("SHAREPOINT_TENANT");
         var sharePointSitePath = Environment.GetEnvironmentVariable("SHAREPOINT_SITE_PATH");
+        var appRegistrationClientId = Environment.GetEnvironmentVariable("APP_REGISTRATION_CLIENT_ID");
 
         _logger.LogInformation(
-            "Variables: MANAGED_IDENTITY_CLIENT_ID={MsiStatus}, APP_REGISTRATION_CLIENT_ID={AppStatus}, AZURE_TENANT_ID={TenantStatus}, SHAREPOINT_TENANT={SharePointTenant}, SHAREPOINT_SITE_PATH={SitePath}",
+            "Variables: MANAGED_IDENTITY_CLIENT_ID={MsiStatus}, AZURE_TENANT_ID={TenantStatus}, SHAREPOINT_TENANT={SharePointTenant}, SHAREPOINT_SITE_PATH={SitePath}, APP_REGISTRATION_CLIENT_ID={AppRegistrationStatus}",
             DescribePresence(managedIdentityClientId),
-            DescribePresence(appRegistrationClientId),
             DescribePresence(tenantId),
             sharePointTenant ?? "(missing)",
-            sharePointSitePath ?? "(missing)");
+            sharePointSitePath ?? "(missing)",
+            DescribePresence(appRegistrationClientId));
 
         var missingVariables = new List<string>();
         if (string.IsNullOrWhiteSpace(managedIdentityClientId))
         {
             missingVariables.Add("MANAGED_IDENTITY_CLIENT_ID");
-        }
-
-        if (string.IsNullOrWhiteSpace(appRegistrationClientId))
-        {
-            missingVariables.Add("APP_REGISTRATION_CLIENT_ID");
-        }
-
-        if (string.IsNullOrWhiteSpace(tenantId))
-        {
-            missingVariables.Add("AZURE_TENANT_ID");
         }
 
         if (string.IsNullOrWhiteSpace(sharePointTenant))
@@ -161,39 +122,23 @@ public sealed class SharePointFederatedConnectionFunction
 
         var settings = new Settings(
             managedIdentityClientId!,
-            appRegistrationClientId!,
-            tenantId!,
+            tenantId,
             sharePointTenant!,
             sharePointSitePath!.Trim('/'));
 
         _logger.LogInformation("✓ Variables validated");
+        if (string.IsNullOrWhiteSpace(settings.TenantId))
+        {
+            _logger.LogInformation("AZURE_TENANT_ID is not required for direct MSI mode.");
+        }
+
+        if (!string.IsNullOrWhiteSpace(appRegistrationClientId))
+        {
+            _logger.LogInformation("APP_REGISTRATION_CLIENT_ID is present but not used by this endpoint.");
+        }
+
         LogStepEnd(1, "Lecture et validation des variables d'environnement");
         return settings;
-    }
-
-    private void LogJwtClaims(string tokenLabel, string token, IReadOnlyList<string> claimTypes)
-    {
-        var handler = new JwtSecurityTokenHandler();
-        if (!handler.CanReadToken(token))
-        {
-            _logger.LogWarning("✗ Unable to decode {TokenLabel}: token is not a readable JWT", tokenLabel);
-            return;
-        }
-
-        var jwtToken = handler.ReadJwtToken(token);
-        foreach (var claimType in claimTypes)
-        {
-            var values = jwtToken.Claims
-                .Where(claim => string.Equals(claim.Type, claimType, StringComparison.OrdinalIgnoreCase))
-                .Select(claim => claim.Value)
-                .ToList();
-
-            _logger.LogInformation(
-                "{TokenLabel} claim {ClaimType}: {ClaimValue}",
-                tokenLabel,
-                claimType,
-                values.Count > 0 ? string.Join(", ", values) : "(missing)");
-        }
     }
 
     private async Task<HttpResponseData> CreateErrorResponseAsync(
@@ -232,8 +177,7 @@ public sealed class SharePointFederatedConnectionFunction
 
     private sealed record Settings(
         string ManagedIdentityClientId,
-        string AppRegistrationClientId,
-        string TenantId,
+        string? TenantId,
         string SharePointTenant,
         string SharePointSitePath);
 }
