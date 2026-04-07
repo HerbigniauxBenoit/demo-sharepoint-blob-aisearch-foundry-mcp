@@ -1,0 +1,75 @@
+# =============================================================================
+# Step Template : Créer AI Search Indexer
+# =============================================================================
+parameters:
+  - name: azureSubscription
+    type: string
+  - name: resourceGroupName
+    type: string
+  - name: aiSearchName
+    type: string
+  - name: indexerName
+    type: string
+  - name: dataSourceName
+    type: string
+  - name: indexName
+    type: string
+
+steps:
+  - task: AzureCLI@2
+    displayName: '⚙️ Créer Indexer'
+    inputs:
+      azureSubscription: ${{ parameters.azureSubscription }}
+      scriptType: 'bash'
+      scriptLocation: 'inlineScript'
+      inlineScript: |
+        echo "================================================"
+        echo "    CRÉATION DE L'INDEXER                       "
+        echo "================================================"
+        echo ""
+        
+        SEARCH_KEY=$(az search admin-key show \
+          --service-name "${{ parameters.aiSearchName }}" \
+          --resource-group "${{ parameters.resourceGroupName }}" \
+          --query primaryKey -o tsv)
+        
+        SEARCH_URL="https://${{ parameters.aiSearchName }}.search.windows.net"
+        
+        echo "Création de l'indexer '${{ parameters.indexerName }}'..."
+        
+        HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
+          -X PUT "$SEARCH_URL/indexers/${{ parameters.indexerName }}?api-version=2024-07-01" \
+          -H "Content-Type: application/json" \
+          -H "api-key: $SEARCH_KEY" \
+          -d '{
+            "name": "${{ parameters.indexerName }}",
+            "dataSourceName": "${{ parameters.dataSourceName }}",
+            "targetIndexName": "${{ parameters.indexName }}",
+            "schedule": {"interval": "PT1H"},
+            "parameters": {
+              "configuration": {
+                "dataToExtract": "contentAndMetadata",
+                "parsingMode": "default"
+              }
+            },
+            "fieldMappings": [
+              {
+                "sourceFieldName": "metadata_storage_path",
+                "targetFieldName": "id",
+                "mappingFunction": {"name": "base64Encode"}
+              }
+            ]
+          }')
+        
+        if [ "$HTTP_STATUS" == "201" ] || [ "$HTTP_STATUS" == "204" ]; then
+          echo "✅ Indexer créé/mis à jour"
+        else
+          echo "❌ Erreur lors de la création de l'indexer (HTTP $HTTP_STATUS)"
+          exit 1
+        fi
+        
+        echo ""
+        echo "=== Configuration AI Search terminée ==="
+        echo "Data Source : ${{ parameters.dataSourceName }}"
+        echo "Index       : ${{ parameters.indexName }}"
+        echo "Indexer     : ${{ parameters.indexerName }}"

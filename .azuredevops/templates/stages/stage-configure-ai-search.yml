@@ -1,0 +1,73 @@
+# =============================================================================
+# Stage Template : Configurer Azure AI Search
+# =============================================================================
+parameters:
+  - name: azureSubscription
+    type: string
+  - name: resourceGroupName
+    type: string
+  - name: aiSearchName
+    type: string
+  - name: storageAccountName
+    type: string
+  - name: dataSourceName
+    type: string
+  - name: indexName
+    type: string
+  - name: indexerName
+    type: string
+  - name: containerName
+    type: string
+  - name: companionName
+    type: string
+  - name: dependsOn
+    type: object
+    default: []
+
+stages:
+  - stage: ConfigureAISearch
+    displayName: '🔎 4. Configurer AI Search'
+    dependsOn: ${{ parameters.dependsOn }}
+    jobs:
+      - job: CreateDataSource
+        displayName: '4.1 Créer Data Source'
+        pool:
+          vmImage: 'ubuntu-latest'
+        steps:
+          - template: ../steps/step-create-ai-search-datasource.yml
+            parameters:
+              azureSubscription: ${{ parameters.azureSubscription }}
+              resourceGroupName: ${{ parameters.resourceGroupName }}
+              aiSearchName: ${{ parameters.aiSearchName }}
+              storageAccountName: ${{ parameters.storageAccountName }}
+              dataSourceName: ${{ parameters.dataSourceName }}
+              containerName: ${{ parameters.containerName }}
+              companionName: ${{ parameters.companionName }}
+
+      - job: CreateIndex
+        displayName: '4.2 Créer Index'
+        dependsOn: CreateDataSource
+        pool:
+          vmImage: 'ubuntu-latest'
+        steps:
+          - template: ../steps/step-create-ai-search-index.yml
+            parameters:
+              azureSubscription: ${{ parameters.azureSubscription }}
+              resourceGroupName: ${{ parameters.resourceGroupName }}
+              aiSearchName: ${{ parameters.aiSearchName }}
+              indexName: ${{ parameters.indexName }}
+
+      - job: CreateIndexer
+        displayName: '4.3 Créer Indexer'
+        dependsOn: CreateIndex
+        pool:
+          vmImage: 'ubuntu-latest'
+        steps:
+          - template: ../steps/step-create-ai-search-indexer.yml
+            parameters:
+              azureSubscription: ${{ parameters.azureSubscription }}
+              resourceGroupName: ${{ parameters.resourceGroupName }}
+              aiSearchName: ${{ parameters.aiSearchName }}
+              indexerName: ${{ parameters.indexerName }}
+              dataSourceName: ${{ parameters.dataSourceName }}
+              indexName: ${{ parameters.indexName }}

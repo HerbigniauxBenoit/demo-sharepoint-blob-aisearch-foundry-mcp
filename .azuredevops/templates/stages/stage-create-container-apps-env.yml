@@ -1,0 +1,64 @@
+# =============================================================================
+# Stage Template : Créer Container Apps Environment
+# =============================================================================
+parameters:
+  - name: azureSubscription
+    type: string
+  - name: resourceGroupName
+    type: string
+  - name: location
+    type: string
+  - name: containerAppsEnvName
+    type: string
+  - name: logAnalyticsName
+    type: string
+  - name: environment
+    type: string
+  - name: projectName
+    type: string
+  - name: dependsOn
+    type: object
+    default: []
+
+stages:
+  - stage: CreateContainerAppsEnv
+    displayName: '🐳 Créer Container Apps Environment'
+    dependsOn: ${{ parameters.dependsOn }}
+    jobs:
+      - job: CreateCAE
+        displayName: 'Créer le Container Apps Environment'
+        pool:
+          vmImage: 'ubuntu-latest'
+        steps:
+          - task: AzureCLI@2
+            displayName: '🐳 az containerapp env create'
+            inputs:
+              azureSubscription: ${{ parameters.azureSubscription }}
+              scriptType: 'bash'
+              scriptLocation: 'inlineScript'
+              inlineScript: |
+                echo "Récupération des informations Log Analytics..."
+                
+                LAW_ID=$(az monitor log-analytics workspace show \
+                  --resource-group "${{ parameters.resourceGroupName }}" \
+                  --workspace-name "${{ parameters.logAnalyticsName }}" \
+                  --query customerId -o tsv)
+                
+                LAW_KEY=$(az monitor log-analytics workspace get-shared-keys \
+                  --resource-group "${{ parameters.resourceGroupName }}" \
+                  --workspace-name "${{ parameters.logAnalyticsName }}" \
+                  --query primarySharedKey -o tsv)
+                
+                echo "Création du Container Apps Environment..."
+                
+                az containerapp env create \
+                  --name "${{ parameters.containerAppsEnvName }}" \
+                  --resource-group "${{ parameters.resourceGroupName }}" \
+                  --location "${{ parameters.location }}" \
+                  --logs-workspace-id "$LAW_ID" \
+                  --logs-workspace-key "$LAW_KEY" \
+                  --tags \
+                    environment="${{ parameters.environment }}" \
+                    project="${{ parameters.projectName }}"
+                
+                echo "✅ Container Apps Environment créé"

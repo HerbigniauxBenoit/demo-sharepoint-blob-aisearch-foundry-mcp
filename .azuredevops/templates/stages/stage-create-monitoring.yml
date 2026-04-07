@@ -1,0 +1,86 @@
+# =============================================================================
+# Stage Template : Créer les ressources de monitoring
+# =============================================================================
+parameters:
+  - name: azureSubscription
+    type: string
+  - name: resourceGroupName
+    type: string
+  - name: location
+    type: string
+  - name: logAnalyticsName
+    type: string
+  - name: appInsightsName
+    type: string
+  - name: environment
+    type: string
+  - name: projectName
+    type: string
+  - name: dependsOn
+    type: object
+    default: []
+
+stages:
+  - stage: CreateMonitoring
+    displayName: '📊 Créer Monitoring'
+    dependsOn: ${{ parameters.dependsOn }}
+    jobs:
+      - job: CreateLogAnalytics
+        displayName: 'Créer Log Analytics'
+        pool:
+          vmImage: 'ubuntu-latest'
+        steps:
+          - task: AzureCLI@2
+            displayName: '📊 az monitor log-analytics workspace create'
+            inputs:
+              azureSubscription: ${{ parameters.azureSubscription }}
+              scriptType: 'bash'
+              scriptLocation: 'inlineScript'
+              inlineScript: |
+                echo "Création du Log Analytics Workspace..."
+                
+                az monitor log-analytics workspace create \
+                  --resource-group "${{ parameters.resourceGroupName }}" \
+                  --workspace-name "${{ parameters.logAnalyticsName }}" \
+                  --location "${{ parameters.location }}" \
+                  --retention-time 30 \
+                  --tags \
+                    environment="${{ parameters.environment }}" \
+                    project="${{ parameters.projectName }}"
+                
+                echo "✅ Log Analytics Workspace créé"
+
+      - job: CreateAppInsights
+        displayName: 'Créer Application Insights'
+        dependsOn: CreateLogAnalytics
+        pool:
+          vmImage: 'ubuntu-latest'
+        steps:
+          - task: AzureCLI@2
+            displayName: '🔍 az monitor app-insights component create'
+            inputs:
+              azureSubscription: ${{ parameters.azureSubscription }}
+              scriptType: 'bash'
+              scriptLocation: 'inlineScript'
+              inlineScript: |
+                echo "Récupération de l'ID du Log Analytics Workspace..."
+                
+                LAW_ID=$(az monitor log-analytics workspace show \
+                  --resource-group "${{ parameters.resourceGroupName }}" \
+                  --workspace-name "${{ parameters.logAnalyticsName }}" \
+                  --query id -o tsv)
+                
+                echo "Création d'Application Insights..."
+                
+                az monitor app-insights component create \
+                  --app "${{ parameters.appInsightsName }}" \
+                  --resource-group "${{ parameters.resourceGroupName }}" \
+                  --location "${{ parameters.location }}" \
+                  --kind web \
+                  --application-type web \
+                  --workspace "$LAW_ID" \
+                  --tags \
+                    environment="${{ parameters.environment }}" \
+                    project="${{ parameters.projectName }}"
+                
+                echo "✅ Application Insights créé"

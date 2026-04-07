@@ -1,0 +1,42 @@
+# =============================================================================
+# Stage Template : Créer Resource Group
+# =============================================================================
+parameters:
+  - name: azureSubscription
+    type: string
+  - name: resourceGroupName
+    type: string
+  - name: location
+    type: string
+  - name: environment
+    type: string
+  - name: projectName
+    type: string
+
+stages:
+  - stage: CreateResourceGroup
+    displayName: '📁 Créer Resource Group'
+    jobs:
+      - job: CreateRG
+        displayName: 'Créer le Resource Group'
+        pool:
+          vmImage: 'ubuntu-latest'
+        steps:
+          - task: AzureCLI@2
+            displayName: '📁 az group create'
+            inputs:
+              azureSubscription: ${{ parameters.azureSubscription }}
+              scriptType: 'bash'
+              scriptLocation: 'inlineScript'
+              inlineScript: |
+                echo "Création du Resource Group ${{ parameters.resourceGroupName }}..."
+                
+                az group create \
+                  --name "${{ parameters.resourceGroupName }}" \
+                  --location "${{ parameters.location }}" \
+                  --tags \
+                    environment="${{ parameters.environment }}" \
+                    project="${{ parameters.projectName }}" \
+                    managedBy="azure-devops"
+                
+                echo "✅ Resource Group créé"

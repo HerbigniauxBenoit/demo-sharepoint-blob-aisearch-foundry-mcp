@@ -1,0 +1,135 @@
+﻿# =============================================================================
+# Step Template : Deploy Function App on Azure Container Apps
+# =============================================================================
+parameters:
+  - name: azureSubscription
+    type: string
+  - name: resourceGroupName
+    type: string
+  - name: functionAppName
+    type: string
+  - name: containerAppsEnvName
+    type: string
+  - name: managedIdentityName
+    type: string
+  - name: appInsightsName
+    type: string
+  - name: acrName
+    type: string
+  - name: imageName
+    type: string
+  - name: imageTag
+    type: string
+  - name: storageAccountName
+    type: string
+  - name: blobContainerName
+    type: string
+  - name: sharepointSiteUrl
+    type: string
+  - name: sharepointDriveName
+    type: string
+  - name: sharepointFolderPath
+    type: string
+  - name: syncSchedule
+    type: string
+  - name: deleteOrphanedBlobs
+    type: string
+  - name: syncPermissions
+    type: string
+  - name: environment
+    type: string
+  - name: companionName
+    type: string
+
+steps:
+  - task: AzureCLI@2
+    displayName: 'Deploy Function App (Container Apps)'
+    inputs:
+      azureSubscription: ${{ parameters.azureSubscription }}
+      scriptType: 'bash'
+      scriptLocation: 'inlineScript'
+      inlineScript: |
+        echo "================================================"
+        echo " DEPLOY FUNCTION APP ON CONTAINER APPS          "
+        echo "================================================"
+        echo ""
+
+        MSI_ID=$(az identity show \
+          --name "${{ parameters.managedIdentityName }}" \
+          --resource-group "${{ parameters.resourceGroupName }}" \
+          --query id -o tsv)
+
+        MSI_CLIENT_ID=$(az identity show \
+          --name "${{ parameters.managedIdentityName }}" \
+          --resource-group "${{ parameters.resourceGroupName }}" \
+          --query clientId -o tsv)
+
+        MSI_PRINCIPAL_ID=$(az identity show \
+          --name "${{ parameters.managedIdentityName }}" \
+          --resource-group "${{ parameters.resourceGroupName }}" \
+          --query principalId -o tsv)
+
+        APP_INSIGHTS_CONNECTION_STRING=$(az monitor app-insights component show \
+          --app "${{ parameters.appInsightsName }}" \
+          --resource-group "${{ parameters.resourceGroupName }}" \
+          --query connectionString -o tsv)
+
+        ACR_ID=$(az acr show --name "${{ parameters.acrName }}" --query id -o tsv)
+        az role assignment create \
+          --assignee-object-id "$MSI_PRINCIPAL_ID" \
+          --assignee-principal-type ServicePrincipal \
+          --role "AcrPull" \
+          --scope "$ACR_ID" \
+          --only-show-errors || echo "Info: AcrPull role already assigned"
+
+        IMAGE_NAME="${{ parameters.acrName }}.azurecr.io/${{ parameters.imageName }}:${{ parameters.imageTag }}"
+
+        if az functionapp show --name "${{ parameters.functionAppName }}" --resource-group "${{ parameters.resourceGroupName }}" &>/dev/null; then
+          echo "Function App exists, updating container image..."
+
+          az functionapp config container set \
+            --name "${{ parameters.functionAppName }}" \
+            --resource-group "${{ parameters.resourceGroupName }}" \
+            --image "$IMAGE_NAME" \
+            --registry-server "https://${{ parameters.acrName }}.azurecr.io"
+        else
+          echo "Creating Function App on Container Apps..."
+
+          az functionapp create \
+            --name "${{ parameters.functionAppName }}" \
+            --resource-group "${{ parameters.resourceGroupName }}" \
+            --storage-account "${{ parameters.storageAccountName }}" \
+            --environment "${{ parameters.containerAppsEnvName }}" \
+            --functions-version 4 \
+            --runtime dotnet-isolated \
+            --runtime-version 8 \
+            --image "$IMAGE_NAME"
+        fi
+
+        az functionapp identity assign \
+          --name "${{ parameters.functionAppName }}" \
+          --resource-group "${{ parameters.resourceGroupName }}" \
+          --identities "$MSI_ID"
+
+        az functionapp config appsettings set \
+          --name "${{ parameters.functionAppName }}" \
+          --resource-group "${{ parameters.resourceGroupName }}" \
+          --settings \
+            "FUNCTIONS_WORKER_RUNTIME=dotnet-isolated" \
+            "SHAREPOINT_SITE_URL=${{ parameters.sharepointSiteUrl }}" \
+            "SHAREPOINT_DRIVE_NAME=${{ parameters.sharepointDriveName }}" \
+            "SHAREPOINT_FOLDER_PATH=${{ parameters.sharepointFolderPath }}" \
+            "AZURE_STORAGE_ACCOUNT_NAME=${{ parameters.storageAccountName }}" \
+            "AZURE_BLOB_CONTAINER_NAME=${{ parameters.blobContainerName }}" \
+            "AZURE_BLOB_PREFIX=" \
+            "DELETE_ORPHANED_BLOBS=${{ parameters.deleteOrphanedBlobs }}" \
+            "SYNC_PERMISSIONS=${{ parameters.syncPermissions }}" \
+            "SYNC_SCHEDULE=${{ parameters.syncSchedule }}" \
+            "AZURE_CLIENT_ID=$MSI_CLIENT_ID" \
+            "APPLICATIONINSIGHTS_CONNECTION_STRING=$APP_INSIGHTS_CONNECTION_STRING" \
+            "AzureWebJobsStorage__accountName=${{ parameters.storageAccountName }}" \
+            "AzureWebJobsStorage__credential=managedidentity" \
+            "AzureWebJobsStorage__clientId=$MSI_CLIENT_ID"
+
+        echo ""
+        echo "Function App deployed: ${{ parameters.functionAppName }}"

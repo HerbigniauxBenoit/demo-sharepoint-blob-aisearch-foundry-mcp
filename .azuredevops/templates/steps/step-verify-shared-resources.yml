@@ -1,0 +1,54 @@
+# =============================================================================
+# Step Template : Vérifier l'existence des ressources partagées
+# =============================================================================
+parameters:
+  - name: azureSubscription
+    type: string
+  - name: resourceGroupName
+    type: string
+  - name: storageAccountName
+    type: string
+  - name: aiSearchName
+    type: string
+  - name: containerAppsEnvName
+    type: string
+
+steps:
+  - task: AzureCLI@2
+    displayName: '🔍 Vérifier les ressources partagées'
+    inputs:
+      azureSubscription: ${{ parameters.azureSubscription }}
+      scriptType: 'bash'
+      scriptLocation: 'inlineScript'
+      inlineScript: |
+        echo "Vérification du Resource Group..."
+        if ! az group show --name "${{ parameters.resourceGroupName }}" &>/dev/null; then
+          echo "❌ ERREUR: Resource Group '${{ parameters.resourceGroupName }}' n'existe pas"
+          echo "   → Exécutez d'abord la pipeline 'Infra Partagée'"
+          exit 1
+        fi
+        echo "✅ Resource Group existe"
+        
+        echo "Vérification du Storage Account..."
+        if ! az storage account show --name "${{ parameters.storageAccountName }}" --resource-group "${{ parameters.resourceGroupName }}" &>/dev/null; then
+          echo "❌ ERREUR: Storage Account '${{ parameters.storageAccountName }}' n'existe pas"
+          exit 1
+        fi
+        echo "✅ Storage Account existe"
+        
+        echo "Vérification d'Azure AI Search..."
+        if ! az search service show --name "${{ parameters.aiSearchName }}" --resource-group "${{ parameters.resourceGroupName }}" &>/dev/null; then
+          echo "❌ ERREUR: AI Search '${{ parameters.aiSearchName }}' n'existe pas"
+          exit 1
+        fi
+        echo "✅ AI Search existe"
+        
+        echo "Vérification du Container Apps Environment..."
+        if ! az containerapp env show --name "${{ parameters.containerAppsEnvName }}" --resource-group "${{ parameters.resourceGroupName }}" &>/dev/null; then
+          echo "❌ ERREUR: Container Apps Environment '${{ parameters.containerAppsEnvName }}' n'existe pas"
+          exit 1
+        fi
+        echo "✅ Container Apps Environment existe"
+        
+        echo ""
+        echo "✅ Toutes les ressources partagées sont présentes"

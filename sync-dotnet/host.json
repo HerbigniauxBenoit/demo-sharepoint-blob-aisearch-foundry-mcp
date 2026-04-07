@@ -19,11 +19,6 @@
     }
   },
   "functionTimeout": "00:30:00",
-  "extensions": {
-    "http": {
-      "routePrefix": "api"
-    }
-  },
   "retry": {
     "strategy": "fixedDelay",
     "maxRetryCount": 3,

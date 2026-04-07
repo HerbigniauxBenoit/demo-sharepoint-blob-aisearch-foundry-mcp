@@ -5,6 +5,7 @@ namespace SharePointSync.Functions.Models;
 public sealed class SyncStats
 {
     public int FilesScanned { get; set; }
+    public int FilesSkippedTooLarge { get; set; }
     public int FilesAdded { get; set; }
     public int FilesUpdated { get; set; }
     public int FilesDeleted { get; set; }

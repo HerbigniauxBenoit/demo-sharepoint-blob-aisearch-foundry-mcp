@@ -1,0 +1,188 @@
+# =============================================================================
+# Pipeline : Infrastructure Partagée
+# =============================================================================
+# Déclencheur : Manuel
+# Objectif    : Créer les ressources partagées pour l'indexation
+# Fréquence   : 1x par environnement
+# =============================================================================
+
+trigger: none
+
+# -----------------------------------------------------------------------------
+# Paramètres
+# -----------------------------------------------------------------------------
+parameters:
+  - name: environment
+    displayName: '🌍 Environnement'
+    type: string
+    default: 'dev'
+    values:
+      - dev
+      - staging
+      - prod
+
+  - name: projectName
+    displayName: '📁 Nom du projet'
+    type: string
+    default: 'myproject'
+
+  - name: location
+    displayName: '📍 Région Azure'
+    type: string
+    default: 'francecentral'
+    values:
+      - francecentral
+      - westeurope
+      - northeurope
+      - eastus
+      - westus2
+
+  - name: aiSearchSku
+    displayName: '🔎 SKU Azure AI Search'
+    type: string
+    default: 'basic'
+    values:
+      - free
+      - basic
+      - standard
+      - standard2
+      - standard3
+
+  - name: storageSku
+    displayName: '💾 SKU Storage Account'
+    type: string
+    default: 'Standard_LRS'
+    values:
+      - Standard_LRS
+      - Standard_GRS
+      - Standard_ZRS
+
+# -----------------------------------------------------------------------------
+# Variables
+# -----------------------------------------------------------------------------
+variables:
+  # Noms des ressources
+  resourceGroupName: 'rg-${{ parameters.projectName }}-indexer-${{ parameters.environment }}'
+  storageAccountName: 'st${{ parameters.projectName }}idx${{ parameters.environment }}'
+  aiSearchName: 'srch-${{ parameters.projectName }}-${{ parameters.environment }}'
+  containerAppsEnvName: 'cae-${{ parameters.projectName }}-${{ parameters.environment }}'
+  logAnalyticsName: 'log-${{ parameters.projectName }}-${{ parameters.environment }}'
+  appInsightsName: 'appi-${{ parameters.projectName }}-${{ parameters.environment }}'
+  
+  # Service Connection
+  azureSubscription: 'azure-service-connection'  # À adapter
+
+# =============================================================================
+# STAGES
+# =============================================================================
+stages:
+  # Stage 1 : Validation
+  - stage: Validation
+    displayName: '✅ Validation'
+    jobs:
+      - job: ValidateParams
+        displayName: 'Valider les paramètres'
+        pool:
+          vmImage: 'ubuntu-latest'
+        steps:
+          - bash: |
+              echo "================================================"
+              echo "     INFRASTRUCTURE PARTAGÉE - VALIDATION       "
+              echo "================================================"
+              echo ""
+              echo "=== Configuration ==="
+              echo "Projet        : ${{ parameters.projectName }}"
+              echo "Environnement : ${{ parameters.environment }}"
+              echo "Région        : ${{ parameters.location }}"
+              echo ""
+              echo "=== Ressources à créer ==="
+              echo "Resource Group     : $(resourceGroupName)"
+              echo "Storage Account    : $(storageAccountName)"
+              echo "AI Search          : $(aiSearchName)"
+              echo "Container Apps Env : $(containerAppsEnvName)"
+              echo "Log Analytics      : $(logAnalyticsName)"
+              echo "App Insights       : $(appInsightsName)"
+              echo ""
+              echo "=== SKUs ==="
+              echo "AI Search : ${{ parameters.aiSearchSku }}"
+              echo "Storage   : ${{ parameters.storageSku }}"
+              echo ""
+            displayName: '📋 Afficher les paramètres'
+
+  # Stage 2 : Créer Resource Group
+  - template: templates/stages/stage-create-resource-group.yml
+    parameters:
+      azureSubscription: $(azureSubscription)
+      resourceGroupName: $(resourceGroupName)
+      location: ${{ parameters.location }}
+      environment: ${{ parameters.environment }}
+      projectName: ${{ parameters.projectName }}
+
+  # Stage 3 : Créer Monitoring (Log Analytics + App Insights)
+  - template: templates/stages/stage-create-monitoring.yml
+    parameters:
+      azureSubscription: $(azureSubscription)
+      resourceGroupName: $(resourceGroupName)
+      location: ${{ parameters.location }}
+      logAnalyticsName: $(logAnalyticsName)
+      appInsightsName: $(appInsightsName)
+      environment: ${{ parameters.environment }}
+      projectName: ${{ parameters.projectName }}
+      dependsOn:
+        - CreateResourceGroup
+
+  # Stage 4 : Créer Storage Account
+  - template: templates/stages/stage-create-storage-account.yml
+    parameters:
+      azureSubscription: $(azureSubscription)
+      resourceGroupName: $(resourceGroupName)
+      location: ${{ parameters.location }}
+      storageAccountName: $(storageAccountName)
+      storageSku: ${{ parameters.storageSku }}
+      environment: ${{ parameters.environment }}
+      projectName: ${{ parameters.projectName }}
+      dependsOn:
+        - CreateResourceGroup
+
+  # Stage 5 : Créer Azure AI Search
+  - template: templates/stages/stage-create-ai-search.yml
+    parameters:
+      azureSubscription: $(azureSubscription)
+      resourceGroupName: $(resourceGroupName)
+      location: ${{ parameters.location }}
+      aiSearchName: $(aiSearchName)
+      aiSearchSku: ${{ parameters.aiSearchSku }}
+      environment: ${{ parameters.environment }}
+      projectName: ${{ parameters.projectName }}
+      dependsOn:
+        - CreateResourceGroup
+
+  # Stage 6 : Créer Container Apps Environment
+  - template: templates/stages/stage-create-container-apps-env.yml
+    parameters:
+      azureSubscription: $(azureSubscription)
+      resourceGroupName: $(resourceGroupName)
+      location: ${{ parameters.location }}
+      containerAppsEnvName: $(containerAppsEnvName)
+      logAnalyticsName: $(logAnalyticsName)
+      environment: ${{ parameters.environment }}
+      projectName: ${{ parameters.projectName }}
+      dependsOn:
+        - CreateMonitoring
+
+  # Stage 7 : Résumé
+  - template: templates/stages/stage-infra-summary.yml
+    parameters:
+      azureSubscription: $(azureSubscription)
+      resourceGroupName: $(resourceGroupName)
+      storageAccountName: $(storageAccountName)
+      aiSearchName: $(aiSearchName)
+      containerAppsEnvName: $(containerAppsEnvName)
+      logAnalyticsName: $(logAnalyticsName)
+      appInsightsName: $(appInsightsName)
+      environment: ${{ parameters.environment }}
+      projectName: ${{ parameters.projectName }}
+      dependsOn:
+        - CreateStorageAccount
+        - CreateAISearch
+        - CreateContainerAppsEnv

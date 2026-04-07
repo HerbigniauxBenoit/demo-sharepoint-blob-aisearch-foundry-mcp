@@ -11,11 +11,11 @@
     "AZURE_STORAGE_ACCOUNT_NAME": "votre-storage-account",
     "AZURE_BLOB_CONTAINER_NAME": "sharepoint-sync",
     "AZURE_BLOB_PREFIX": "",
+    "MAX_FILE_SIZE_MB": "50",
+    "SYNC_SCHEDULE": "0 */6 * * *",
     
     "DELETE_ORPHANED_BLOBS": "false",
-    "DRY_RUN": "true",
-    "SYNC_PERMISSIONS": "false",
-    "FORCE_FULL_SYNC": "false"
+    "SYNC_PERMISSIONS": "false"
   },
   "ConnectionStrings": {}
 }

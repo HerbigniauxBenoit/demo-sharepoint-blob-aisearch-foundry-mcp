@@ -7,13 +7,18 @@ using Microsoft.Extensions.Logging;
 using SharePointSync.Functions.Services;
 
 var host = new HostBuilder()
-    .ConfigureFunctionsWebApplication()
+    .ConfigureFunctionsWorkerDefaults()
     .ConfigureAppConfiguration((context, config) =>
     {
         config.AddEnvironmentVariables();
         if (context.HostingEnvironment.IsDevelopment())
         {
             config.AddJsonFile("local.settings.json", optional: true, reloadOnChange: true);
+        }
+
+        if (string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("SYNC_SCHEDULE")))
+        {
+            Environment.SetEnvironmentVariable("SYNC_SCHEDULE", "0 */6 * * *");
         }
     })
     .ConfigureServices((context, services) =>
@@ -40,10 +45,6 @@ var host = new HostBuilder()
         services.AddScoped<SharePointGraphClient>();
         services.AddScoped<BlobStorageSyncClient>();
         services.AddScoped<SharePointSyncOrchestrator>();
-
-        // Health checks
-        services.AddHealthChecks()
-            .AddCheck("self", () => Microsoft.Extensions.Diagnostics.HealthChecks.HealthCheckResult.Healthy());
     })
     .Build();
 

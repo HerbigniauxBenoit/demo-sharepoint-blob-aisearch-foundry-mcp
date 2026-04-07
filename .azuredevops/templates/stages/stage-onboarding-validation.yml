@@ -1,0 +1,108 @@
+# =============================================================================
+# Stage Template : Validation des paramètres d'onboarding
+# =============================================================================
+parameters:
+  - name: azureSubscription
+    type: string
+  - name: environment
+    type: string
+  - name: companionName
+    type: string
+  - name: projectName
+    type: string
+  - name: resourceGroupName
+    type: string
+  - name: storageAccountName
+    type: string
+  - name: aiSearchName
+    type: string
+  - name: containerAppsEnvName
+    type: string
+  - name: functionAppName
+    type: string
+  - name: managedIdentityName
+    type: string
+  - name: blobContainerName
+    type: string
+  - name: aiSearchIndexName
+    type: string
+  - name: acrName
+    type: string
+  - name: imageName
+    type: string
+  - name: imageTag
+    type: string
+  - name: sharepointSiteUrl
+    type: string
+  - name: sharepointDriveName
+    type: string
+  - name: sharepointFolderPath
+    type: string
+  - name: syncSchedule
+    type: string
+  - name: deleteOrphanedBlobs
+    type: string
+  - name: syncPermissions
+    type: string
+
+stages:
+  - stage: Validation
+    displayName: '✅ 1. Validation'
+    jobs:
+      - job: ValidateParameters
+        displayName: 'Valider les paramètres'
+        pool:
+          vmImage: 'ubuntu-latest'
+        steps:
+          - bash: |
+              echo "================================================"
+              echo "        ONBOARDING COMPAGNON - VALIDATION       "
+              echo "================================================"
+              echo ""
+              echo "=== Identification ==="
+              echo "Compagnon        : ${{ parameters.companionName }}"
+              echo "Environnement    : ${{ parameters.environment }}"
+              echo "Projet           : ${{ parameters.projectName }}"
+              echo ""
+              echo "=== SharePoint (Source) ==="
+              echo "Site URL         : ${{ parameters.sharepointSiteUrl }}"
+              echo "Drive            : ${{ parameters.sharepointDriveName }}"
+              echo "Folder           : ${{ parameters.sharepointFolderPath }}"
+              echo ""
+              echo "=== Configuration Sync ==="
+              echo "Schedule         : ${{ parameters.syncSchedule }}"
+              echo "Delete orphans   : ${{ parameters.deleteOrphanedBlobs }}"
+              echo "Sync permissions : ${{ parameters.syncPermissions }}"
+              echo ""
+              echo "=== Image Docker ==="
+              echo "Image            : ${{ parameters.acrName }}.azurecr.io/${{ parameters.imageName }}:${{ parameters.imageTag }}"
+              echo ""
+              echo "=== Ressources à créer ==="
+              echo "MSI              : ${{ parameters.managedIdentityName }}"
+              echo "Function App     : ${{ parameters.functionAppName }}"
+              echo "Blob Container   : ${{ parameters.blobContainerName }}"
+              echo "AI Search Index  : ${{ parameters.aiSearchIndexName }}"
+              echo ""
+            displayName: '📋 Afficher les paramètres'
+
+          - template: ../steps/step-verify-shared-resources.yml
+            parameters:
+              azureSubscription: ${{ parameters.azureSubscription }}
+              resourceGroupName: ${{ parameters.resourceGroupName }}
+              storageAccountName: ${{ parameters.storageAccountName }}
+              aiSearchName: ${{ parameters.aiSearchName }}
+              containerAppsEnvName: ${{ parameters.containerAppsEnvName }}
+
+          - task: AzureCLI@2
+            displayName: '🔍 Vérifier si la Function App existe déjà'
+            inputs:
+              azureSubscription: ${{ parameters.azureSubscription }}
+              scriptType: 'bash'
+              scriptLocation: 'inlineScript'
+              inlineScript: |
+                if az functionapp show --name "${{ parameters.functionAppName }}" --resource-group "${{ parameters.resourceGroupName }}" &>/dev/null; then
+                  echo "⚠️  ATTENTION: Function App '${{ parameters.functionAppName }}' existe déjà"
+                  echo "   La pipeline va mettre à jour la configuration existante"
+                else
+                  echo "✅ Function App n'existe pas encore (création)"
+                fi

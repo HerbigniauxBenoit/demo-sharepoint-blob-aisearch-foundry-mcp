@@ -29,15 +29,7 @@ public sealed class SharePointSyncOrchestrator
 
         var (_, driveId) = _graphClient.GetResolvedIds();
 
-        if (!options.ForceFullSync)
-        {
-            var deltaLink = await _blobClient.LoadDeltaTokenAsync(cancellationToken);
-            await RunDeltaAsync(options, stats, deltaLink, logger, cancellationToken);
-        }
-        else
-        {
-            await RunFullAsync(options, stats, logger, cancellationToken);
-        }
+        await RunFullAsync(options, stats, logger, cancellationToken);
 
         if (options.SyncPermissions)
         {
@@ -48,7 +40,7 @@ public sealed class SharePointSyncOrchestrator
                 {
                     var permissions = await _graphClient.GetFilePermissionsAsync(file.Id, file.Path, cancellationToken);
                     var blobName = _blobClient.GetBlobName(file.Path);
-                    await _blobClient.UpdateBlobMetadataAsync(blobName, permissions.ToMetadata(), options.DryRun, cancellationToken);
+                    await _blobClient.UpdateBlobMetadataAsync(blobName, permissions.ToMetadata(), cancellationToken);
                     stats.PermissionsSynced++;
                 }
                 catch (Exception ex)
@@ -60,9 +52,10 @@ public sealed class SharePointSyncOrchestrator
         }
 
         logger.LogInformation(
-            "Sync complete mode={Mode}, scanned={Scanned}, added={Added}, updated={Updated}, deleted={Deleted}, unchanged={Unchanged}, failed={Failed}, bytes={Bytes}, permissionsSynced={PermSynced}, permissionsFailed={PermFailed}",
+            "Sync complete mode={Mode}, scanned={Scanned}, skippedTooLarge={SkippedTooLarge}, added={Added}, updated={Updated}, deleted={Deleted}, unchanged={Unchanged}, failed={Failed}, bytes={Bytes}, permissionsSynced={PermSynced}, permissionsFailed={PermFailed}",
             stats.SyncMode,
             stats.FilesScanned,
+            stats.FilesSkippedTooLarge,
             stats.FilesAdded,
             stats.FilesUpdated,
             stats.FilesDeleted,
@@ -73,72 +66,6 @@ public sealed class SharePointSyncOrchestrator
             stats.PermissionsFailed);
 
         return stats;
-    }
-
-    private async Task RunDeltaAsync(
-        SyncOptions options,
-        SyncStats stats,
-        string? deltaLink,
-        ILogger logger,
-        CancellationToken cancellationToken)
-    {
-        stats.SyncMode = string.IsNullOrWhiteSpace(deltaLink) ? "delta-initial" : "delta-incremental";
-
-        var deltaResult = await _graphClient.GetDeltaAsync(deltaLink, cancellationToken);
-        foreach (var change in deltaResult.Changes)
-        {
-            stats.FilesScanned++;
-
-            if (change.ChangeType == DeltaChangeType.Deleted)
-            {
-                if (!options.DeleteOrphanedBlobs)
-                {
-                    continue;
-                }
-
-                try
-                {
-                    await _blobClient.DeleteBlobAsync(_blobClient.GetBlobName(change.ItemPath), options.DryRun, cancellationToken);
-                    stats.FilesDeleted++;
-                }
-                catch (Exception ex)
-                {
-                    logger.LogError(ex, "Failed to delete blob for deleted SharePoint item {Path}", change.ItemPath);
-                    stats.FilesFailed++;
-                }
-
-                continue;
-            }
-
-            var file = change.File;
-            if (file is null)
-            {
-                continue;
-            }
-
-            try
-            {
-                var content = await _graphClient.DownloadFileAsync(file.Id, cancellationToken);
-                await _blobClient.UploadBlobAsync(
-                    file.Path,
-                    content,
-                    file.Id,
-                    file.LastModified,
-                    file.ContentHash,
-                    options.DryRun,
-                    cancellationToken);
-
-                stats.FilesAdded++;
-                stats.BytesTransferred += content.LongLength;
-            }
-            catch (Exception ex)
-            {
-                logger.LogError(ex, "Failed to process changed file {Path}", file.Path);
-                stats.FilesFailed++;
-            }
-        }
-
-        await _blobClient.SaveDeltaTokenAsync(deltaResult.DeltaToken, options.DryRun, cancellationToken);
     }
 
     private async Task RunFullAsync(
@@ -156,6 +83,18 @@ public sealed class SharePointSyncOrchestrator
         foreach (var file in files)
         {
             stats.FilesScanned++;
+
+            if (file.Size > options.MaxFileSizeBytes)
+            {
+                logger.LogWarning(
+                    "Skipping file {Path} because size {SizeBytes} exceeds MAX_FILE_SIZE_MB ({MaxFileSizeMb} MB).",
+                    file.Path,
+                    file.Size,
+                    options.MaxFileSizeMb);
+                stats.FilesSkippedTooLarge++;
+                continue;
+            }
+
             var blobName = _blobClient.GetBlobName(file.Path);
             seenBlobNames.Add(blobName);
 
@@ -164,14 +103,14 @@ public sealed class SharePointSyncOrchestrator
                 if (!existingBlobs.TryGetValue(blobName, out var existingBlob))
                 {
                     var content = await _graphClient.DownloadFileAsync(file.Id, cancellationToken);
-                    await _blobClient.UploadBlobAsync(file.Path, content, file.Id, file.LastModified, file.ContentHash, options.DryRun, cancellationToken);
+                    await _blobClient.UploadBlobAsync(file.Path, content, file.Id, file.LastModified, file.ContentHash, cancellationToken);
                     stats.FilesAdded++;
                     stats.BytesTransferred += content.LongLength;
                 }
                 else if (_blobClient.ShouldUpdate(existingBlob, file.LastModified, file.ContentHash))
                 {
                     var content = await _graphClient.DownloadFileAsync(file.Id, cancellationToken);
-                    await _blobClient.UploadBlobAsync(file.Path, content, file.Id, file.LastModified, file.ContentHash, options.DryRun, cancellationToken);
+                    await _blobClient.UploadBlobAsync(file.Path, content, file.Id, file.LastModified, file.ContentHash, cancellationToken);
                     stats.FilesUpdated++;
                     stats.BytesTransferred += content.LongLength;
                 }
@@ -198,7 +137,7 @@ public sealed class SharePointSyncOrchestrator
 
                 try
                 {
-                    await _blobClient.DeleteBlobAsync(blobName, options.DryRun, cancellationToken);
+                    await _blobClient.DeleteBlobAsync(blobName, cancellationToken);
                     stats.FilesDeleted++;
                 }
                 catch (Exception ex)

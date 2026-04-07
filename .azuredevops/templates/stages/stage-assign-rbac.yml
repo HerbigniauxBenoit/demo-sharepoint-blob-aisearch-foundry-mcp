@@ -1,0 +1,46 @@
+# =============================================================================
+# Stage Template : Assigner les rôles RBAC
+# =============================================================================
+parameters:
+  - name: azureSubscription
+    type: string
+  - name: resourceGroupName
+    type: string
+  - name: managedIdentityName
+    type: string
+  - name: storageAccountName
+    type: string
+  - name: aiSearchName
+    type: string
+  - name: dependsOn
+    type: object
+    default: []
+
+stages:
+  - stage: AssignRBAC
+    displayName: '🔑 5. Assigner RBAC'
+    dependsOn: ${{ parameters.dependsOn }}
+    jobs:
+      - job: AssignStorageRoles
+        displayName: 'Assigner les rôles Storage'
+        pool:
+          vmImage: 'ubuntu-latest'
+        steps:
+          - template: ../steps/step-assign-rbac-storage.yml
+            parameters:
+              azureSubscription: ${{ parameters.azureSubscription }}
+              resourceGroupName: ${{ parameters.resourceGroupName }}
+              managedIdentityName: ${{ parameters.managedIdentityName }}
+              storageAccountName: ${{ parameters.storageAccountName }}
+
+      - job: AssignSearchRoles
+        displayName: 'Assigner les rôles AI Search'
+        pool:
+          vmImage: 'ubuntu-latest'
+        steps:
+          - template: ../steps/step-assign-rbac-ai-search.yml
+            parameters:
+              azureSubscription: ${{ parameters.azureSubscription }}
+              resourceGroupName: ${{ parameters.resourceGroupName }}
+              managedIdentityName: ${{ parameters.managedIdentityName }}
+              aiSearchName: ${{ parameters.aiSearchName }}

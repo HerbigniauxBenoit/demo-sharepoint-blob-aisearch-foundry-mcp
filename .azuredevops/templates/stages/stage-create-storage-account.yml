@@ -1,0 +1,57 @@
+# =============================================================================
+# Stage Template : Créer Storage Account
+# =============================================================================
+parameters:
+  - name: azureSubscription
+    type: string
+  - name: resourceGroupName
+    type: string
+  - name: location
+    type: string
+  - name: storageAccountName
+    type: string
+  - name: storageSku
+    type: string
+    default: 'Standard_LRS'
+  - name: environment
+    type: string
+  - name: projectName
+    type: string
+  - name: dependsOn
+    type: object
+    default: []
+
+stages:
+  - stage: CreateStorageAccount
+    displayName: '💾 Créer Storage Account'
+    dependsOn: ${{ parameters.dependsOn }}
+    jobs:
+      - job: CreateStorage
+        displayName: 'Créer le Storage Account'
+        pool:
+          vmImage: 'ubuntu-latest'
+        steps:
+          - task: AzureCLI@2
+            displayName: '💾 az storage account create'
+            inputs:
+              azureSubscription: ${{ parameters.azureSubscription }}
+              scriptType: 'bash'
+              scriptLocation: 'inlineScript'
+              inlineScript: |
+                echo "Création du Storage Account ${{ parameters.storageAccountName }}..."
+                
+                az storage account create \
+                  --name "${{ parameters.storageAccountName }}" \
+                  --resource-group "${{ parameters.resourceGroupName }}" \
+                  --location "${{ parameters.location }}" \
+                  --sku "${{ parameters.storageSku }}" \
+                  --kind StorageV2 \
+                  --access-tier Hot \
+                  --min-tls-version TLS1_2 \
+                  --allow-blob-public-access false \
+                  --tags \
+                    environment="${{ parameters.environment }}" \
+                    project="${{ parameters.projectName }}" \
+                    purpose="indexation"
+                
+                echo "✅ Storage Account créé"

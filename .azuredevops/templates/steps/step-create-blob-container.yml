@@ -1,0 +1,55 @@
+# =============================================================================
+# Step Template : Créer un Container Blob
+# =============================================================================
+parameters:
+  - name: azureSubscription
+    type: string
+  - name: resourceGroupName
+    type: string
+  - name: storageAccountName
+    type: string
+  - name: containerName
+    type: string
+
+steps:
+  - task: AzureCLI@2
+    displayName: '📦 Créer Container Blob'
+    inputs:
+      azureSubscription: ${{ parameters.azureSubscription }}
+      scriptType: 'bash'
+      scriptLocation: 'inlineScript'
+      inlineScript: |
+        echo "================================================"
+        echo "    CRÉATION DU CONTAINER BLOB                  "
+        echo "================================================"
+        echo ""
+        
+        # Récupérer la clé du Storage Account
+        STORAGE_KEY=$(az storage account keys list \
+          --account-name "${{ parameters.storageAccountName }}" \
+          --resource-group "${{ parameters.resourceGroupName }}" \
+          --query "[0].value" -o tsv)
+        
+        # Vérifier si le container existe
+        EXISTS=$(az storage container exists \
+          --name "${{ parameters.containerName }}" \
+          --account-name "${{ parameters.storageAccountName }}" \
+          --account-key "$STORAGE_KEY" \
+          --query exists -o tsv)
+        
+        if [ "$EXISTS" == "true" ]; then
+          echo "ℹ️  Container '${{ parameters.containerName }}' existe déjà"
+        else
+          echo "Création du container '${{ parameters.containerName }}'..."
+          
+          az storage container create \
+            --name "${{ parameters.containerName }}" \
+            --account-name "${{ parameters.storageAccountName }}" \
+            --account-key "$STORAGE_KEY" \
+            --public-access off
+          
+          echo "✅ Container créé"
+        fi
+        
+        echo ""
+        echo "Container URL : https://${{ parameters.storageAccountName }}.blob.core.windows.net/${{ parameters.containerName }}"

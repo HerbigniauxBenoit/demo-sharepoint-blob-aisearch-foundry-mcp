@@ -1,0 +1,107 @@
+# =============================================================================
+# Pipeline : CI/CD - Build & Push Docker Image
+# =============================================================================
+# Déclencheur : Push sur main ou création d'un tag
+# Objectif    : Build l'image Docker et la push vers l'ACR
+# =============================================================================
+
+trigger:
+  branches:
+    include:
+      - main
+  tags:
+    include:
+      - 'v*'
+
+pr:
+  branches:
+    include:
+      - main
+
+# -----------------------------------------------------------------------------
+# Paramètres
+# -----------------------------------------------------------------------------
+parameters:
+  - name: imageTag
+    displayName: 'Tag de l''image (laisser vide pour auto)'
+    type: string
+    default: ''
+
+# -----------------------------------------------------------------------------
+# Variables
+# -----------------------------------------------------------------------------
+variables:
+  acrName: 'acrmycompany'  # À adapter
+  imageName: 'sharepoint-sync'
+  dockerfilePath: '$(Build.SourcesDirectory)/sync-dotnet/Dockerfile'
+  dockerBuildContext: '$(Build.SourcesDirectory)/sync-dotnet'
+  azureSubscription: 'azure-service-connection'  # À adapter
+
+# =============================================================================
+# STAGES
+# =============================================================================
+stages:
+  - stage: Build
+    displayName: '🔨 Build & Push Image'
+    jobs:
+      - job: BuildAndPush
+        displayName: 'Build Docker Image'
+        pool:
+          vmImage: 'ubuntu-latest'
+        
+        variables:
+          ${{ if ne(parameters.imageTag, '') }}:
+            finalTag: ${{ parameters.imageTag }}
+          ${{ elseif startsWith(variables['Build.SourceBranch'], 'refs/tags/') }}:
+            finalTag: ${{ replace(variables['Build.SourceBranch'], 'refs/tags/', '') }}
+          ${{ else }}:
+            finalTag: $(Build.SourceVersion)
+
+        steps:
+          - checkout: self
+            displayName: '📥 Checkout code'
+
+          - task: AzureCLI@2
+            displayName: '🔐 Login to ACR'
+            inputs:
+              azureSubscription: $(azureSubscription)
+              scriptType: 'bash'
+              scriptLocation: 'inlineScript'
+              inlineScript: |
+                az acr login --name $(acrName)
+
+          - task: AzureCLI@2
+            displayName: '🐳 Build Docker image'
+            inputs:
+              azureSubscription: $(azureSubscription)
+              scriptType: 'bash'
+              scriptLocation: 'inlineScript'
+              inlineScript: |
+                echo "Building image with tag: $(finalTag)"
+                
+                docker build \
+                  -t $(acrName).azurecr.io/$(imageName):$(finalTag) \
+                  -t $(acrName).azurecr.io/$(imageName):latest \
+                  -f $(dockerfilePath) \
+                  $(dockerBuildContext)
+
+          - task: AzureCLI@2
+            displayName: '📤 Push to ACR'
+            inputs:
+              azureSubscription: $(azureSubscription)
+              scriptType: 'bash'
+              scriptLocation: 'inlineScript'
+              inlineScript: |
+                echo "Pushing image to ACR..."
+                
+                docker push $(acrName).azurecr.io/$(imageName):$(finalTag)
+                docker push $(acrName).azurecr.io/$(imageName):latest
+                
+                echo "✅ Image pushed successfully!"
+                echo "   - $(acrName).azurecr.io/$(imageName):$(finalTag)"
+                echo "   - $(acrName).azurecr.io/$(imageName):latest"
+
+          - bash: |
+              echo "##vso[task.setvariable variable=imageTag;isOutput=true]$(finalTag)"
+            name: outputVars
+            displayName: '📋 Output image tag'

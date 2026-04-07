@@ -1,100 +1,36 @@
 # SharePoint to Azure Blob Storage Sync with AI Search
 
-Sync files from SharePoint Online to Azure Blob Storage with permissions (ACLs), index them in Azure AI Search, and query with document-level security.
+This repository syncs documents from SharePoint Online to Azure Blob Storage, then indexes them with Azure AI Search.
 
-## Architecture
+## Target architecture
 
-```
-SharePoint Online ──▶ Sync Job (Python/.NET 10 Function) ──▶ Azure Blob Storage ──▶ Azure AI Search
-     files &               delta API              + ACL metadata       + OCR / chunking
-     permissions                                                       + vector embeddings
-                                                                       + ACL filtering
-```
+- Hosting: Azure Functions on Azure Container Apps
+- Runtime: .NET 8 (isolated worker, Functions v4)
+- Execution: TimerTrigger only
+- Topology: one Function App (Container Apps hosted) per companion
+- Identity: one user-assigned managed identity per companion
+- Configuration: environment variables only
 
-## Components
+## Repository structure
 
-| Directory | Description | README |
-|-----------|-------------|--------|
-| [sync/](sync/) | SharePoint → Blob sync job (Python historique) | [sync/README.md](sync/README.md) |
-| [sync-dotnet/](sync-dotnet/) | SharePoint → Blob sync job (Azure Function .NET 10) | [sync-dotnet/README.md](sync-dotnet/README.md) |
-| [ai-search/](ai-search/) | Search index, skillset, indexer deployment | [ai-search/README.md](ai-search/README.md) |
-| [demo/](demo/) | Flask web app — Entra ID login + ACL-filtered search | [demo/README.md](demo/README.md) |
-| [tests/](tests/) | Search verification scripts | [tests/README.md](tests/README.md) |
+- sync-dotnet/: .NET 8 Azure Functions timer worker that syncs SharePoint to Blob
+- ai-search/: Azure AI Search datasource/index/indexer assets and scripts
+- .azuredevops/: CI/CD and onboarding pipelines/templates
 
-## Quick Start
+## Security prerequisites (manual)
 
-### Prerequisites
+The security team must configure Microsoft Graph access manually for each companion identity:
 
-- Python 3.11+
-- Azure CLI (`az login`)
-- Azure resources: SharePoint site, Storage Account, AI Search, Azure OpenAI
+1. Grant Microsoft Graph application permission Sites.Selected to the managed identity service principal.
+2. Grant admin consent.
+3. Authorize the target SharePoint site for that identity.
 
-### Run Everything
+These steps are intentionally not automated in pipelines.
 
-```bash
-# Linux/macOS
-./run-all.sh
+## Deployment model
 
-# Windows (PowerShell)
-.\run-all.ps1
-```
+1. Build and push the sync image using .azuredevops/pipeline-ci-cd.yml.
+2. Run shared infrastructure pipeline once per environment.
+3. Run companion onboarding pipeline once per companion.
 
-This syncs files, deploys search components, waits for indexing, and runs tests.
-
-### Run Individual Components
-
-```bash
-cd sync && python main.py          # Sync only (Python historique)
-cd sync-dotnet && func start       # Sync only (.NET 10 Azure Function)
-cd ai-search && ./script.ps1 ...   # Deploy search only
-cd demo && python app.py            # Run demo app
-cd tests && python test_search.py   # Run tests
-```
-
-## Configuration
-
-Create a `.env` file in the root (see each component's README for full details):
-
-| Variable | Required | Description |
-|----------|----------|-------------|
-| `SHAREPOINT_SITE_URL` | Yes | e.g. `https://contoso.sharepoint.com/sites/MySite` |
-| `AZURE_STORAGE_ACCOUNT_NAME` | Yes | Storage account name |
-| `AZURE_BLOB_CONTAINER_NAME` | No | Default: `sharepoint-sync` |
-| `SYNC_PERMISSIONS` | No | `true` to sync ACLs to blob metadata |
-| `SEARCH_SERVICE_NAME` | Yes | AI Search service name |
-| `SEARCH_API_KEY` | Yes | AI Search admin key |
-
-## Authentication
-
-| Method | Use Case | Configuration |
-|--------|----------|---------------|
-| App Registration | Local dev | `AZURE_CLIENT_ID`, `AZURE_CLIENT_SECRET`, `AZURE_TENANT_ID` |
-| Managed Identity | Production (Container Apps) | No config needed |
-| Azure CLI | Quick local testing | `az login` |
-
-## Production Deployment
-
-**Docker:**
-```bash
-docker build -t sharepoint-sync:latest .
-docker run --env-file .env sharepoint-sync:latest
-```
-
-**Azure Function App:** See [sync/deploy/README.md](sync/deploy/README.md)
-
-**Azure Container Apps Job:**
-```bash
-az containerapp job create \
-  --name sharepoint-sync-job \
-  --resource-group your-rg \
-  --environment your-env \
-  --image your-acr.azurecr.io/sharepoint-sync:latest \
-  --trigger-type Schedule \
-  --cron-expression "0 0 * * *" \
-  --cpu 0.5 --memory 1Gi \
-  --mi-system-assigned
-```
-
-## License
-
-MIT
+The onboarding pipeline deploys an Azure Function App on Container Apps hosting, configures timer settings and app settings, and binds the companion managed identity.

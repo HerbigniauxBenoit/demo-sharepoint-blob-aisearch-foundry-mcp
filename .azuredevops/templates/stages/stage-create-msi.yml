@@ -1,0 +1,35 @@
+# =============================================================================
+# Stage Template : Créer Managed Identity
+# =============================================================================
+parameters:
+  - name: azureSubscription
+    type: string
+  - name: resourceGroupName
+    type: string
+  - name: managedIdentityName
+    type: string
+  - name: environment
+    type: string
+  - name: companionName
+    type: string
+  - name: dependsOn
+    type: object
+    default: []
+
+stages:
+  - stage: CreateManagedIdentity
+    displayName: '🔐 2. Créer Managed Identity'
+    dependsOn: ${{ parameters.dependsOn }}
+    jobs:
+      - job: CreateMSI
+        displayName: 'Créer User-Assigned Managed Identity'
+        pool:
+          vmImage: 'ubuntu-latest'
+        steps:
+          - template: ../steps/step-create-managed-identity.yml
+            parameters:
+              azureSubscription: ${{ parameters.azureSubscription }}
+              resourceGroupName: ${{ parameters.resourceGroupName }}
+              managedIdentityName: ${{ parameters.managedIdentityName }}
+              environment: ${{ parameters.environment }}
+              companionName: ${{ parameters.companionName }}

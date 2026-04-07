@@ -1,0 +1,216 @@
+# =============================================================================
+# Pipeline : Onboarding d'un Compagnon
+# =============================================================================
+# Déclencheur : Manuel
+# Objectif    : Déployer une nouvelle instance de la fonction de sync
+# Prérequis   : Pipeline Infra Partagée exécutée au préalable
+# =============================================================================
+
+trigger: none
+
+# -----------------------------------------------------------------------------
+# Paramètres
+# -----------------------------------------------------------------------------
+parameters:
+  - name: environment
+    displayName: '🌍 Environnement'
+    type: string
+    default: 'dev'
+    values:
+      - dev
+      - staging
+      - prod
+
+  - name: companionName
+    displayName: '🤖 Nom du compagnon (ex: hr-assistant)'
+    type: string
+
+  - name: projectName
+    displayName: '📁 Nom du projet'
+    type: string
+    default: 'myproject'
+
+  - name: sharepointSiteUrl
+    displayName: '🔗 URL du site SharePoint'
+    type: string
+
+  - name: sharepointDriveName
+    displayName: '📂 Nom du Drive SharePoint'
+    type: string
+    default: 'Documents'
+
+  - name: sharepointFolderPath
+    displayName: '📁 Chemin du dossier SharePoint'
+    type: string
+    default: '/'
+
+  - name: syncSchedule
+    displayName: '⏰ Schedule CRON'
+    type: string
+    default: '0 */6 * * *'
+
+  - name: deleteOrphanedBlobs
+    displayName: '🗑️ Supprimer les blobs orphelins'
+    type: boolean
+    default: true
+
+  - name: syncPermissions
+    displayName: '🔐 Synchroniser les permissions'
+    type: boolean
+    default: false
+
+  - name: imageTag
+    displayName: '🐳 Tag de l''image Docker'
+    type: string
+    default: 'latest'
+
+# -----------------------------------------------------------------------------
+# Variables
+# -----------------------------------------------------------------------------
+variables:
+  # Ressources partagées
+  resourceGroupName: 'rg-${{ parameters.projectName }}-indexer-${{ parameters.environment }}'
+  storageAccountName: 'st${{ parameters.projectName }}idx${{ parameters.environment }}'
+  aiSearchName: 'srch-${{ parameters.projectName }}-${{ parameters.environment }}'
+  containerAppsEnvName: 'cae-${{ parameters.projectName }}-${{ parameters.environment }}'
+  appInsightsName: 'appi-${{ parameters.projectName }}-${{ parameters.environment }}'
+  
+  # Ressources du compagnon
+  managedIdentityName: 'id-${{ parameters.companionName }}-${{ parameters.environment }}'
+  functionAppName: 'func-${{ parameters.companionName }}-sync-${{ parameters.environment }}'
+  blobContainerName: '${{ parameters.companionName }}'
+  aiSearchIndexName: 'idx-${{ parameters.companionName }}'
+  aiSearchDataSourceName: 'ds-${{ parameters.companionName }}'
+  aiSearchIndexerName: 'idxr-${{ parameters.companionName }}'
+  
+  # ACR
+  acrName: 'acrmycompany'  # À adapter
+  imageName: 'sharepoint-sync'
+  
+  # Service Connection
+  azureSubscription: 'azure-service-connection'  # À adapter
+
+# =============================================================================
+# STAGES
+# =============================================================================
+stages:
+  # Stage 1 : Validation
+  - template: templates/stages/stage-onboarding-validation.yml
+    parameters:
+      azureSubscription: $(azureSubscription)
+      environment: ${{ parameters.environment }}
+      companionName: ${{ parameters.companionName }}
+      projectName: ${{ parameters.projectName }}
+      resourceGroupName: $(resourceGroupName)
+      storageAccountName: $(storageAccountName)
+      aiSearchName: $(aiSearchName)
+      containerAppsEnvName: $(containerAppsEnvName)
+      functionAppName: $(functionAppName)
+      managedIdentityName: $(managedIdentityName)
+      blobContainerName: $(blobContainerName)
+      aiSearchIndexName: $(aiSearchIndexName)
+      acrName: $(acrName)
+      imageName: $(imageName)
+      imageTag: ${{ parameters.imageTag }}
+      sharepointSiteUrl: ${{ parameters.sharepointSiteUrl }}
+      sharepointDriveName: ${{ parameters.sharepointDriveName }}
+      sharepointFolderPath: ${{ parameters.sharepointFolderPath }}
+      syncSchedule: ${{ parameters.syncSchedule }}
+      deleteOrphanedBlobs: ${{ parameters.deleteOrphanedBlobs }}
+      syncPermissions: ${{ parameters.syncPermissions }}
+
+  # Stage 2 : Créer MSI
+  - template: templates/stages/stage-create-msi.yml
+    parameters:
+      azureSubscription: $(azureSubscription)
+      resourceGroupName: $(resourceGroupName)
+      managedIdentityName: $(managedIdentityName)
+      environment: ${{ parameters.environment }}
+      companionName: ${{ parameters.companionName }}
+      dependsOn:
+        - Validation
+
+  # Stage 3 : Créer Container Blob
+  - template: templates/stages/stage-create-blob-container.yml
+    parameters:
+      azureSubscription: $(azureSubscription)
+      resourceGroupName: $(resourceGroupName)
+      storageAccountName: $(storageAccountName)
+      containerName: $(blobContainerName)
+      dependsOn:
+        - Validation
+
+  # Stage 4 : Configurer AI Search
+  - template: templates/stages/stage-configure-ai-search.yml
+    parameters:
+      azureSubscription: $(azureSubscription)
+      resourceGroupName: $(resourceGroupName)
+      aiSearchName: $(aiSearchName)
+      storageAccountName: $(storageAccountName)
+      dataSourceName: $(aiSearchDataSourceName)
+      indexName: $(aiSearchIndexName)
+      indexerName: $(aiSearchIndexerName)
+      containerName: $(blobContainerName)
+      companionName: ${{ parameters.companionName }}
+      dependsOn:
+        - CreateBlobContainer
+
+  # Stage 5 : Assigner RBAC
+  - template: templates/stages/stage-assign-rbac.yml
+    parameters:
+      azureSubscription: $(azureSubscription)
+      resourceGroupName: $(resourceGroupName)
+      managedIdentityName: $(managedIdentityName)
+      storageAccountName: $(storageAccountName)
+      aiSearchName: $(aiSearchName)
+      dependsOn:
+        - CreateManagedIdentity
+        - CreateBlobContainer
+
+  # Stage 6 : Déployer Container App
+  - template: templates/stages/stage-deploy-container-app.yml
+    parameters:
+      azureSubscription: $(azureSubscription)
+      resourceGroupName: $(resourceGroupName)
+      functionAppName: $(functionAppName)
+      containerAppsEnvName: $(containerAppsEnvName)
+      managedIdentityName: $(managedIdentityName)
+      appInsightsName: $(appInsightsName)
+      acrName: $(acrName)
+      imageName: $(imageName)
+      imageTag: ${{ parameters.imageTag }}
+      storageAccountName: $(storageAccountName)
+      blobContainerName: $(blobContainerName)
+      sharepointSiteUrl: ${{ parameters.sharepointSiteUrl }}
+      sharepointDriveName: ${{ parameters.sharepointDriveName }}
+      sharepointFolderPath: ${{ parameters.sharepointFolderPath }}
+      syncSchedule: ${{ parameters.syncSchedule }}
+      deleteOrphanedBlobs: ${{ parameters.deleteOrphanedBlobs }}
+      syncPermissions: ${{ parameters.syncPermissions }}
+      environment: ${{ parameters.environment }}
+      companionName: ${{ parameters.companionName }}
+      dependsOn:
+        - AssignRBAC
+        - ConfigureAISearch
+
+  # Stage 7 : Résumé
+  - template: templates/stages/stage-onboarding-summary.yml
+    parameters:
+      azureSubscription: $(azureSubscription)
+      resourceGroupName: $(resourceGroupName)
+      functionAppName: $(functionAppName)
+      managedIdentityName: $(managedIdentityName)
+      blobContainerName: $(blobContainerName)
+      aiSearchIndexName: $(aiSearchIndexName)
+      dataSourceName: $(aiSearchDataSourceName)
+      indexerName: $(aiSearchIndexerName)
+      environment: ${{ parameters.environment }}
+      companionName: ${{ parameters.companionName }}
+      sharepointSiteUrl: ${{ parameters.sharepointSiteUrl }}
+      sharepointDriveName: ${{ parameters.sharepointDriveName }}
+      sharepointFolderPath: ${{ parameters.sharepointFolderPath }}
+      syncSchedule: ${{ parameters.syncSchedule }}
+      deleteOrphanedBlobs: ${{ parameters.deleteOrphanedBlobs }}
+      syncPermissions: ${{ parameters.syncPermissions }}
+      dependsOn:
+        - DeployContainerApp

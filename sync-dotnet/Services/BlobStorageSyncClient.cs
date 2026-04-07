@@ -88,15 +88,9 @@ public sealed class BlobStorageSyncClient
         string sharePointItemId,
         DateTimeOffset? sharePointLastModified,
         string? sharePointContentHash,
-        bool dryRun,
         CancellationToken cancellationToken)
     {
         EnsureInitialized();
-        if (dryRun)
-        {
-            return;
-        }
-
         var blobName = GetBlobName(sharePointPath);
         var blob = _containerClient!.GetBlobClient(blobName);
 
@@ -146,14 +140,9 @@ public sealed class BlobStorageSyncClient
         return true;
     }
 
-    public async Task DeleteBlobAsync(string blobName, bool dryRun, CancellationToken cancellationToken)
+    public async Task DeleteBlobAsync(string blobName, CancellationToken cancellationToken)
     {
         EnsureInitialized();
-        if (dryRun)
-        {
-            return;
-        }
-
         var blob = _containerClient!.GetBlobClient(blobName);
         try
         {
@@ -165,14 +154,9 @@ public sealed class BlobStorageSyncClient
         }
     }
 
-    public async Task UpdateBlobMetadataAsync(string blobName, IDictionary<string, string> additionalMetadata, bool dryRun, CancellationToken cancellationToken)
+    public async Task UpdateBlobMetadataAsync(string blobName, IDictionary<string, string> additionalMetadata, CancellationToken cancellationToken)
     {
         EnsureInitialized();
-        if (dryRun)
-        {
-            return;
-        }
-
         var blob = _containerClient!.GetBlobClient(blobName);
         IDictionary<string, string> currentMetadata;
 
@@ -218,10 +202,10 @@ public sealed class BlobStorageSyncClient
         }
     }
 
-    public async Task SaveDeltaTokenAsync(string deltaToken, bool dryRun, CancellationToken cancellationToken)
+    public async Task SaveDeltaTokenAsync(string deltaToken, CancellationToken cancellationToken)
     {
         EnsureInitialized();
-        if (dryRun || string.IsNullOrWhiteSpace(deltaToken))
+        if (string.IsNullOrWhiteSpace(deltaToken))
         {
             return;
         }

@@ -1,0 +1,40 @@
+# =============================================================================
+# Step Template : Assigner les rôles RBAC AI Search
+# =============================================================================
+parameters:
+  - name: azureSubscription
+    type: string
+  - name: resourceGroupName
+    type: string
+  - name: managedIdentityName
+    type: string
+  - name: aiSearchName
+    type: string
+
+steps:
+  - task: AzureCLI@2
+    displayName: '🔑 Assigner rôle AI Search'
+    inputs:
+      azureSubscription: ${{ parameters.azureSubscription }}
+      scriptType: 'bash'
+      scriptLocation: 'inlineScript'
+      inlineScript: |
+        echo "Assignation du rôle AI Search..."
+        
+        MSI_PRINCIPAL_ID=$(az identity show \
+          --name "${{ parameters.managedIdentityName }}" \
+          --resource-group "${{ parameters.resourceGroupName }}" \
+          --query principalId -o tsv)
+        
+        SEARCH_ID=$(az search service show \
+          --name "${{ parameters.aiSearchName }}" \
+          --resource-group "${{ parameters.resourceGroupName }}" \
+          --query id -o tsv)
+        
+        az role assignment create \
+          --assignee "$MSI_PRINCIPAL_ID" \
+          --role "Search Index Data Contributor" \
+          --scope "$SEARCH_ID" \
+          --only-show-errors || echo "ℹ️  Rôle peut-être déjà assigné"
+        
+        echo "✅ Search Index Data Contributor assigné"

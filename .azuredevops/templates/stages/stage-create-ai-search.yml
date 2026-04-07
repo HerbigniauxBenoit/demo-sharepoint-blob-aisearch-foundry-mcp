@@ -1,0 +1,56 @@
+# =============================================================================
+# Stage Template : Créer Azure AI Search
+# =============================================================================
+parameters:
+  - name: azureSubscription
+    type: string
+  - name: resourceGroupName
+    type: string
+  - name: location
+    type: string
+  - name: aiSearchName
+    type: string
+  - name: aiSearchSku
+    type: string
+    default: 'basic'
+  - name: environment
+    type: string
+  - name: projectName
+    type: string
+  - name: dependsOn
+    type: object
+    default: []
+
+stages:
+  - stage: CreateAISearch
+    displayName: '🔎 Créer Azure AI Search'
+    dependsOn: ${{ parameters.dependsOn }}
+    jobs:
+      - job: CreateSearch
+        displayName: 'Créer le service AI Search'
+        pool:
+          vmImage: 'ubuntu-latest'
+        steps:
+          - task: AzureCLI@2
+            displayName: '🔎 az search service create'
+            inputs:
+              azureSubscription: ${{ parameters.azureSubscription }}
+              scriptType: 'bash'
+              scriptLocation: 'inlineScript'
+              inlineScript: |
+                echo "Création d'Azure AI Search ${{ parameters.aiSearchName }}..."
+                
+                az search service create \
+                  --name "${{ parameters.aiSearchName }}" \
+                  --resource-group "${{ parameters.resourceGroupName }}" \
+                  --location "${{ parameters.location }}" \
+                  --sku "${{ parameters.aiSearchSku }}" \
+                  --partition-count 1 \
+                  --replica-count 1 \
+                  --tags \
+                    environment="${{ parameters.environment }}" \
+                    project="${{ parameters.projectName }}"
+                
+                echo "✅ Azure AI Search créé"
+                echo ""
+                echo "URL: https://${{ parameters.aiSearchName }}.search.windows.net"

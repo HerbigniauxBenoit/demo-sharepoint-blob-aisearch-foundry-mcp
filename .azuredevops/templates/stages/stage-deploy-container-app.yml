@@ -1,0 +1,77 @@
+# =============================================================================
+# Stage Template : Déployer Container App
+# =============================================================================
+parameters:
+  - name: azureSubscription
+    type: string
+  - name: resourceGroupName
+    type: string
+  - name: functionAppName
+    type: string
+  - name: containerAppsEnvName
+    type: string
+  - name: managedIdentityName
+    type: string
+  - name: appInsightsName
+    type: string
+  - name: acrName
+    type: string
+  - name: imageName
+    type: string
+  - name: imageTag
+    type: string
+  - name: storageAccountName
+    type: string
+  - name: blobContainerName
+    type: string
+  - name: sharepointSiteUrl
+    type: string
+  - name: sharepointDriveName
+    type: string
+  - name: sharepointFolderPath
+    type: string
+  - name: syncSchedule
+    type: string
+  - name: deleteOrphanedBlobs
+    type: string
+  - name: syncPermissions
+    type: string
+  - name: environment
+    type: string
+  - name: companionName
+    type: string
+  - name: dependsOn
+    type: object
+    default: []
+
+stages:
+  - stage: DeployContainerApp
+    displayName: '🚀 6. Déployer Function App (Container Apps)'
+    dependsOn: ${{ parameters.dependsOn }}
+    jobs:
+      - job: DeployApp
+        displayName: 'Déployer la Function App'
+        pool:
+          vmImage: 'ubuntu-latest'
+        steps:
+          - template: ../steps/step-deploy-container-app.yml
+            parameters:
+              azureSubscription: ${{ parameters.azureSubscription }}
+              resourceGroupName: ${{ parameters.resourceGroupName }}
+              functionAppName: ${{ parameters.functionAppName }}
+              containerAppsEnvName: ${{ parameters.containerAppsEnvName }}
+              managedIdentityName: ${{ parameters.managedIdentityName }}
+              appInsightsName: ${{ parameters.appInsightsName }}
+              acrName: ${{ parameters.acrName }}
+              imageName: ${{ parameters.imageName }}
+              imageTag: ${{ parameters.imageTag }}
+              storageAccountName: ${{ parameters.storageAccountName }}
+              blobContainerName: ${{ parameters.blobContainerName }}
+              sharepointSiteUrl: ${{ parameters.sharepointSiteUrl }}
+              sharepointDriveName: ${{ parameters.sharepointDriveName }}
+              sharepointFolderPath: ${{ parameters.sharepointFolderPath }}
+              syncSchedule: ${{ parameters.syncSchedule }}
+              deleteOrphanedBlobs: ${{ parameters.deleteOrphanedBlobs }}
+              syncPermissions: ${{ parameters.syncPermissions }}
+              environment: ${{ parameters.environment }}
+              companionName: ${{ parameters.companionName }}

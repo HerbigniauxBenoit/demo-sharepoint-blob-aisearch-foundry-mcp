@@ -1,0 +1,32 @@
+# =============================================================================
+# Stage Template : Créer Container Blob
+# =============================================================================
+parameters:
+  - name: azureSubscription
+    type: string
+  - name: resourceGroupName
+    type: string
+  - name: storageAccountName
+    type: string
+  - name: containerName
+    type: string
+  - name: dependsOn
+    type: object
+    default: []
+
+stages:
+  - stage: CreateBlobContainer
+    displayName: '📦 3. Créer Container Blob'
+    dependsOn: ${{ parameters.dependsOn }}
+    jobs:
+      - job: CreateContainer
+        displayName: 'Créer le container blob'
+        pool:
+          vmImage: 'ubuntu-latest'
+        steps:
+          - template: ../steps/step-create-blob-container.yml
+            parameters:
+              azureSubscription: ${{ parameters.azureSubscription }}
+              resourceGroupName: ${{ parameters.resourceGroupName }}
+              storageAccountName: ${{ parameters.storageAccountName }}
+              containerName: ${{ parameters.containerName }}

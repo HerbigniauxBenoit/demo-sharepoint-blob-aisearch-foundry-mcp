@@ -1,0 +1,68 @@
+# =============================================================================
+# Step Template : Créer AI Search Data Source
+# =============================================================================
+parameters:
+  - name: azureSubscription
+    type: string
+  - name: resourceGroupName
+    type: string
+  - name: aiSearchName
+    type: string
+  - name: storageAccountName
+    type: string
+  - name: dataSourceName
+    type: string
+  - name: containerName
+    type: string
+  - name: companionName
+    type: string
+
+steps:
+  - task: AzureCLI@2
+    displayName: '🔗 Créer Data Source'
+    inputs:
+      azureSubscription: ${{ parameters.azureSubscription }}
+      scriptType: 'bash'
+      scriptLocation: 'inlineScript'
+      inlineScript: |
+        echo "================================================"
+        echo "    CRÉATION DU DATA SOURCE                     "
+        echo "================================================"
+        echo ""
+        
+        SEARCH_KEY=$(az search admin-key show \
+          --service-name "${{ parameters.aiSearchName }}" \
+          --resource-group "${{ parameters.resourceGroupName }}" \
+          --query primaryKey -o tsv)
+        
+        SEARCH_URL="https://${{ parameters.aiSearchName }}.search.windows.net"
+        
+        STORAGE_CONNECTION=$(az storage account show-connection-string \
+          --name "${{ parameters.storageAccountName }}" \
+          --resource-group "${{ parameters.resourceGroupName }}" \
+          --query connectionString -o tsv)
+        
+        echo "Création du Data Source '${{ parameters.dataSourceName }}'..."
+        
+        HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
+          -X PUT "$SEARCH_URL/datasources/${{ parameters.dataSourceName }}?api-version=2024-07-01" \
+          -H "Content-Type: application/json" \
+          -H "api-key: $SEARCH_KEY" \
+          -d '{
+            "name": "${{ parameters.dataSourceName }}",
+            "type": "azureblob",
+            "credentials": {
+              "connectionString": "'"$STORAGE_CONNECTION"'"
+            },
+            "container": {
+              "name": "${{ parameters.containerName }}"
+            },
+            "description": "Data source for companion ${{ parameters.companionName }}"
+          }')
+        
+        if [ "$HTTP_STATUS" == "201" ] || [ "$HTTP_STATUS" == "204" ]; then
+          echo "✅ Data Source créé/mis à jour"
+        else
+          echo "❌ Erreur lors de la création du Data Source (HTTP $HTTP_STATUS)"
+          exit 1
+        fi

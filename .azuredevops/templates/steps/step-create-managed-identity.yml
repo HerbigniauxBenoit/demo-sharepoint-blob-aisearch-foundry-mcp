@@ -1,0 +1,69 @@
+# =============================================================================
+# Step Template : Créer une User-Assigned Managed Identity
+# =============================================================================
+parameters:
+  - name: azureSubscription
+    type: string
+  - name: resourceGroupName
+    type: string
+  - name: managedIdentityName
+    type: string
+  - name: environment
+    type: string
+  - name: companionName
+    type: string
+
+steps:
+  - task: AzureCLI@2
+    displayName: '🔐 Créer Managed Identity'
+    inputs:
+      azureSubscription: ${{ parameters.azureSubscription }}
+      scriptType: 'bash'
+      scriptLocation: 'inlineScript'
+      inlineScript: |
+        echo "================================================"
+        echo "    CRÉATION DE LA MANAGED IDENTITY             "
+        echo "================================================"
+        echo ""
+        
+        # Vérifier si la MSI existe déjà
+        if az identity show --name "${{ parameters.managedIdentityName }}" --resource-group "${{ parameters.resourceGroupName }}" &>/dev/null; then
+          echo "ℹ️  MSI '${{ parameters.managedIdentityName }}' existe déjà"
+        else
+          echo "Création de la Managed Identity..."
+          
+          LOCATION=$(az group show --name "${{ parameters.resourceGroupName }}" --query location -o tsv)
+          
+          az identity create \
+            --name "${{ parameters.managedIdentityName }}" \
+            --resource-group "${{ parameters.resourceGroupName }}" \
+            --location "$LOCATION" \
+            --tags \
+              environment="${{ parameters.environment }}" \
+              companion="${{ parameters.companionName }}" \
+              managedBy="azure-devops"
+          
+          echo "✅ Managed Identity créée"
+        fi
+        
+        # Récupérer et afficher les informations de la MSI
+        MSI_ID=$(az identity show \
+          --name "${{ parameters.managedIdentityName }}" \
+          --resource-group "${{ parameters.resourceGroupName }}" \
+          --query id -o tsv)
+        
+        MSI_CLIENT_ID=$(az identity show \
+          --name "${{ parameters.managedIdentityName }}" \
+          --resource-group "${{ parameters.resourceGroupName }}" \
+          --query clientId -o tsv)
+        
+        MSI_PRINCIPAL_ID=$(az identity show \
+          --name "${{ parameters.managedIdentityName }}" \
+          --resource-group "${{ parameters.resourceGroupName }}" \
+          --query principalId -o tsv)
+        
+        echo ""
+        echo "=== Informations MSI ==="
+        echo "Resource ID  : $MSI_ID"
+        echo "Client ID    : $MSI_CLIENT_ID"
+        echo "Principal ID : $MSI_PRINCIPAL_ID"

@@ -1,0 +1,52 @@
+# =============================================================================
+# Step Template : Assigner les rôles RBAC Storage
+# =============================================================================
+parameters:
+  - name: azureSubscription
+    type: string
+  - name: resourceGroupName
+    type: string
+  - name: managedIdentityName
+    type: string
+  - name: storageAccountName
+    type: string
+
+steps:
+  - task: AzureCLI@2
+    displayName: '🔑 Assigner rôles Storage'
+    inputs:
+      azureSubscription: ${{ parameters.azureSubscription }}
+      scriptType: 'bash'
+      scriptLocation: 'inlineScript'
+      inlineScript: |
+        echo "================================================"
+        echo "    ASSIGNATION DES RÔLES RBAC - STORAGE        "
+        echo "================================================"
+        echo ""
+        
+        MSI_PRINCIPAL_ID=$(az identity show \
+          --name "${{ parameters.managedIdentityName }}" \
+          --resource-group "${{ parameters.resourceGroupName }}" \
+          --query principalId -o tsv)
+        
+        STORAGE_ID=$(az storage account show \
+          --name "${{ parameters.storageAccountName }}" \
+          --resource-group "${{ parameters.resourceGroupName }}" \
+          --query id -o tsv)
+        
+        echo "MSI Principal ID : $MSI_PRINCIPAL_ID"
+        echo "Storage ID       : $STORAGE_ID"
+        echo ""
+        
+        for ROLE in "Storage Blob Data Owner" "Storage Queue Data Contributor" "Storage Table Data Contributor"; do
+          echo "Assignation de '$ROLE'..."
+          az role assignment create \
+            --assignee "$MSI_PRINCIPAL_ID" \
+            --role "$ROLE" \
+            --scope "$STORAGE_ID" \
+            --only-show-errors || echo "ℹ️  Rôle peut-être déjà assigné"
+          echo "✅ $ROLE"
+        done
+        
+        echo ""
+        echo "✅ Tous les rôles Storage assignés"

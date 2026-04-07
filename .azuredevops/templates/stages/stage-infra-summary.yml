@@ -1,0 +1,74 @@
+# =============================================================================
+# Stage Template : Résumé de l'infrastructure partagée
+# =============================================================================
+parameters:
+  - name: azureSubscription
+    type: string
+  - name: resourceGroupName
+    type: string
+  - name: storageAccountName
+    type: string
+  - name: aiSearchName
+    type: string
+  - name: containerAppsEnvName
+    type: string
+  - name: logAnalyticsName
+    type: string
+  - name: appInsightsName
+    type: string
+  - name: environment
+    type: string
+  - name: projectName
+    type: string
+  - name: dependsOn
+    type: object
+    default: []
+
+stages:
+  - stage: InfraSummary
+    displayName: '📋 Résumé Infrastructure'
+    dependsOn: ${{ parameters.dependsOn }}
+    jobs:
+      - job: ShowSummary
+        displayName: 'Afficher le résumé'
+        pool:
+          vmImage: 'ubuntu-latest'
+        steps:
+          - task: AzureCLI@2
+            displayName: '📋 Résumé complet'
+            inputs:
+              azureSubscription: ${{ parameters.azureSubscription }}
+              scriptType: 'bash'
+              scriptLocation: 'inlineScript'
+              inlineScript: |
+                echo "========================================================"
+                echo "    ✅ INFRASTRUCTURE PARTAGÉE CRÉÉE                    "
+                echo "========================================================"
+                echo ""
+                echo "=== Identification ==="
+                echo "Projet        : ${{ parameters.projectName }}"
+                echo "Environnement : ${{ parameters.environment }}"
+                echo "Resource Group: ${{ parameters.resourceGroupName }}"
+                echo ""
+                
+                echo "=== Ressources créées ==="
+                echo "├── Storage Account     : ${{ parameters.storageAccountName }}"
+                echo "├── Azure AI Search     : ${{ parameters.aiSearchName }}"
+                echo "├── Container Apps Env  : ${{ parameters.containerAppsEnvName }}"
+                echo "├── Log Analytics       : ${{ parameters.logAnalyticsName }}"
+                echo "└── Application Insights: ${{ parameters.appInsightsName }}"
+                echo ""
+                
+                echo "=== URLs ==="
+                echo "Storage     : https://${{ parameters.storageAccountName }}.blob.core.windows.net"
+                echo "AI Search   : https://${{ parameters.aiSearchName }}.search.windows.net"
+                echo ""
+                
+                echo "========================================================"
+                echo "    💡 PROCHAINE ÉTAPE                                   "
+                echo "========================================================"
+                echo ""
+                echo "Exécutez maintenant la pipeline 'Onboarding Compagnon'"
+                echo "pour déployer un premier compagnon dans cette infrastructure."
+                echo ""
+                echo "========================================================"

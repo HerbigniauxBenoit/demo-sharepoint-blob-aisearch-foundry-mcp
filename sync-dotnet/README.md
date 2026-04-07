@@ -1,23 +1,33 @@
-# Sync (.NET 10 Azure Function)
+# Sync (.NET 8 Azure Functions)
 
-Migration C# de la partie `sync` Python, en Azure Function (worker isolé).
+Sync SharePoint Online files to Azure Blob Storage using an Azure Functions isolated worker.
 
-## Fonctionnalités portées
+## Runtime target
 
-- Sync delta via Microsoft Graph (`/root/delta`)
-- Persistance du delta token dans Blob (`.sync-state/delta-token.json`)
-- Fallback full sync (`FORCE_FULL_SYNC=true`)
-- Suppression des blobs orphelins (`DELETE_ORPHANED_BLOBS=true`)
-- Sync des permissions SharePoint vers metadata blob (`user_ids`, `group_ids`)
-- Mode dry-run (`DRY_RUN=true`)
+- .NET 8
+- Azure Functions v4
+- TimerTrigger only (no HttpTrigger)
+- Hosting target: Azure Functions on Azure Container Apps
 
-## Pré-requis
+## Implemented behavior
 
-- .NET SDK 10
-- Azure Functions Core Tools v4
-- Variables d'environnement (mêmes noms que la version Python)
+- Full sync SharePoint files to Blob
+- Configurable max file size limit (`MAX_FILE_SIZE_MB`, oversized files are skipped)
+- Optional orphan blob deletion (`DELETE_ORPHANED_BLOBS`)
+- Optional SharePoint permissions sync to blob metadata (`SYNC_PERMISSIONS`)
+- Managed identity auth for Graph and Blob access
 
-## Lancer en local
+## Required security prerequisite (manual)
+
+The security team must configure Graph access manually for each companion managed identity:
+
+1. Assign Microsoft Graph application permission `Sites.Selected`.
+2. Grant admin consent.
+3. Grant site-level authorization on the target SharePoint site.
+
+This prerequisite is intentionally not automated by this project.
+
+## Local run
 
 ```powershell
 cd sync-dotnet
@@ -25,69 +35,31 @@ dotnet restore
 func start
 ```
 
-Le trigger est HTTP (`GET`/`POST`) sur la route `/api/sharepoint-sync`.
+The sync is started only by timer according to `SYNC_SCHEDULE`.
 
-Exemples:
-
-```powershell
-# GET
-curl "http://localhost:7071/api/sharepoint-sync?dry_run=true"
-
-# POST JSON
-curl -X POST "http://localhost:7071/api/sharepoint-sync" -H "Content-Type: application/json" -d "{\"force_full_sync\":true,\"dry_run\":false}"
-```
-
-## Variables d'environnement
+## Environment variables
 
 | Variable | Required | Default |
 |----------|----------|---------|
-| `SHAREPOINT_SITE_URL` | Yes | — |
+| `SHAREPOINT_SITE_URL` | Yes | - |
 | `SHAREPOINT_DRIVE_NAME` | No | `Documents` |
 | `SHAREPOINT_FOLDER_PATH` | No | `/` |
-| `AZURE_STORAGE_ACCOUNT_NAME` | Yes | — |
+| `AZURE_STORAGE_ACCOUNT_NAME` | Yes | - |
 | `AZURE_BLOB_CONTAINER_NAME` | No | `sharepoint-sync` |
-| `AZURE_BLOB_PREFIX` | No | — |
+| `AZURE_BLOB_PREFIX` | No | empty |
+| `MAX_FILE_SIZE_MB` | No | `50` |
 | `DELETE_ORPHANED_BLOBS` | No | `false` |
-| `DRY_RUN` | No | `false` |
 | `SYNC_PERMISSIONS` | No | `false` |
-| `FORCE_FULL_SYNC` | No | `false` |
+| `SYNC_SCHEDULE` | No | `0 */6 * * *` |
+| `AZURE_CLIENT_ID` | No | empty |
 
-## Déploiement Azure Function
+For Functions host storage with managed identity, deployment config must provide:
 
-Tu peux publier ce projet vers une Function App Linux `dotnet-isolated` (Functions v4).
+- `AzureWebJobsStorage__accountName`
+- `AzureWebJobsStorage__credential=managedidentity`
+- `AzureWebJobsStorage__clientId`
 
-Exemple rapide:
+## Technical debt
 
-```powershell
-cd sync-dotnet
-func azure functionapp publish <FUNCTION_APP_NAME>
-```
-
-Configurer les app settings:
-
-```powershell
-az functionapp config appsettings set --resource-group <RG> --name <FUNCTION_APP_NAME> --settings \
-	FUNCTIONS_WORKER_RUNTIME=dotnet-isolated \
-	SHAREPOINT_SITE_URL="https://contoso.sharepoint.com/sites/MySite" \
-	SHAREPOINT_DRIVE_NAME="Documents" \
-	SHAREPOINT_FOLDER_PATH="/" \
-	AZURE_STORAGE_ACCOUNT_NAME="<storage-account>" \
-	AZURE_BLOB_CONTAINER_NAME="sharepoint-sync" \
-	AZURE_BLOB_PREFIX="" \
-	DELETE_ORPHANED_BLOBS="false" \
-	SYNC_PERMISSIONS="true" \
-	DRY_RUN="false" \
-	FORCE_FULL_SYNC="false"
-```
-
-Appeler la function en Azure:
-
-```powershell
-curl "https://<FUNCTION_APP_NAME>.azurewebsites.net/api/sharepoint-sync?dry_run=true&code=<FUNCTION_KEY>"
-```
-
-Récupérer la function key:
-
-```powershell
-az functionapp function keys list --resource-group <RG> --name <FUNCTION_APP_NAME> --function-name SharePointBlobSync
-```
+- The code contains delta token support primitives (`GetDeltaAsync`, save/load token), but orchestration currently runs full sync each cycle.
+- This is kept unchanged intentionally for a low-risk migration path. A later iteration can enable true delta orchestration with tests.

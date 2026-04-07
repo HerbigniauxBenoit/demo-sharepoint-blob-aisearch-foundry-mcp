@@ -1,0 +1,117 @@
+# =============================================================================
+# Stage Template : Résumé du déploiement
+# =============================================================================
+parameters:
+  - name: azureSubscription
+    type: string
+  - name: resourceGroupName
+    type: string
+  - name: functionAppName
+    type: string
+  - name: managedIdentityName
+    type: string
+  - name: blobContainerName
+    type: string
+  - name: aiSearchIndexName
+    type: string
+  - name: dataSourceName
+    type: string
+  - name: indexerName
+    type: string
+  - name: environment
+    type: string
+  - name: companionName
+    type: string
+  - name: sharepointSiteUrl
+    type: string
+  - name: sharepointDriveName
+    type: string
+  - name: sharepointFolderPath
+    type: string
+  - name: syncSchedule
+    type: string
+  - name: deleteOrphanedBlobs
+    type: string
+  - name: syncPermissions
+    type: string
+  - name: dependsOn
+    type: object
+    default: []
+
+stages:
+  - stage: Summary
+    displayName: '📋 7. Résumé'
+    dependsOn: ${{ parameters.dependsOn }}
+    jobs:
+      - job: ShowSummary
+        displayName: 'Afficher le résumé'
+        pool:
+          vmImage: 'ubuntu-latest'
+        steps:
+          - task: AzureCLI@2
+            displayName: '📋 Résumé complet'
+            inputs:
+              azureSubscription: ${{ parameters.azureSubscription }}
+              scriptType: 'bash'
+              scriptLocation: 'inlineScript'
+              inlineScript: |
+                echo "========================================================"
+                echo "    ✅ ONBOARDING DU COMPAGNON TERMINÉ                  "
+                echo "========================================================"
+                echo ""
+                echo "=== Identification ==="
+                echo "Compagnon     : ${{ parameters.companionName }}"
+                echo "Environnement : ${{ parameters.environment }}"
+                echo ""
+
+                APP_STATE=$(az functionapp show \
+                  --name "${{ parameters.functionAppName }}" \
+                  --resource-group "${{ parameters.resourceGroupName }}" \
+                  --query "state" -o tsv)
+
+                echo "=== Function App ==="
+                echo "Name  : ${{ parameters.functionAppName }}"
+                echo "State : $APP_STATE"
+                echo "Mode  : TimerTrigger only"
+                echo ""
+                
+                echo "=== Ressources créées ==="
+                echo "├── MSI            : ${{ parameters.managedIdentityName }}"
+                echo "├── Function App   : ${{ parameters.functionAppName }}"
+                echo "├── Blob Container : ${{ parameters.blobContainerName }}"
+                echo "├── AI Search Index: ${{ parameters.aiSearchIndexName }}"
+                echo "├── Data Source    : ${{ parameters.dataSourceName }}"
+                echo "└── Indexer        : ${{ parameters.indexerName }}"
+                echo ""
+                
+                echo "=== Configuration SharePoint ==="
+                echo "Site   : ${{ parameters.sharepointSiteUrl }}"
+                echo "Drive  : ${{ parameters.sharepointDriveName }}"
+                echo "Folder : ${{ parameters.sharepointFolderPath }}"
+                echo ""
+                
+                echo "=== Configuration Sync ==="
+                echo "Schedule         : ${{ parameters.syncSchedule }}"
+                echo "Delete orphans   : ${{ parameters.deleteOrphanedBlobs }}"
+                echo "Sync permissions : ${{ parameters.syncPermissions }}"
+                echo ""
+                
+                echo "========================================================"
+                echo "    ⚠️  ACTION MANUELLE REQUISE                         "
+                echo "========================================================"
+                echo ""
+                echo "Configurez les permissions Graph dans Entra ID :"
+                echo "1. Allez dans Entra ID → Enterprise Applications"
+                echo "2. Trouvez la MSI '${{ parameters.managedIdentityName }}'"
+                echo "3. Ajoutez la permission application 'Sites.Selected' (Microsoft Graph)"
+                echo "4. Accordez le consentement administrateur"
+                echo "5. Autorisez explicitement le site SharePoint cible pour cette identite"
+                echo ""
+                echo "========================================================"
+                echo "    💡 VERIFICATION DE L'EXECUTION TIMER                "
+                echo "========================================================"
+                echo ""
+                echo "Une fois les permissions Graph configurees, verifier les logs :"
+                echo "   az functionapp logs tail --name ${{ parameters.functionAppName }} --resource-group ${{ parameters.resourceGroupName }}"
+                echo ""
+                echo "========================================================"
