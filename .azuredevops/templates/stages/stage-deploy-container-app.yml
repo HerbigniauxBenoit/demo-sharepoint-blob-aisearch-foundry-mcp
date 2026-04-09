@@ -4,7 +4,9 @@
 parameters:
   - name: azureSubscription
     type: string
-  - name: resourceGroupName
+  - name: companionResourceGroupName
+    type: string
+  - name: sharedResourceGroupName
     type: string
   - name: functionAppName
     type: string
@@ -40,6 +42,8 @@ parameters:
     type: string
   - name: companionName
     type: string
+  - name: companionExistsBehavior
+    type: string
   - name: dependsOn
     type: object
     default: []
@@ -57,7 +61,8 @@ stages:
           - template: ../steps/step-deploy-container-app.yml
             parameters:
               azureSubscription: ${{ parameters.azureSubscription }}
-              resourceGroupName: ${{ parameters.resourceGroupName }}
+              companionResourceGroupName: ${{ parameters.companionResourceGroupName }}
+              sharedResourceGroupName: ${{ parameters.sharedResourceGroupName }}
               functionAppName: ${{ parameters.functionAppName }}
               containerAppsEnvName: ${{ parameters.containerAppsEnvName }}
               managedIdentityName: ${{ parameters.managedIdentityName }}
@@ -75,3 +80,4 @@ stages:
               syncPermissions: ${{ parameters.syncPermissions }}
               environment: ${{ parameters.environment }}
               companionName: ${{ parameters.companionName }}
+              companionExistsBehavior: ${{ parameters.companionExistsBehavior }}

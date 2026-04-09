@@ -11,6 +11,14 @@ This repository syncs documents from SharePoint Online to Azure Blob Storage, th
 - Identity: one user-assigned managed identity per companion
 - Configuration: environment variables only
 
+## Azure resource-group topology
+
+- shared platform resources live in `companion-shared-<env>`
+- all companion-specific resources live in `rg-companion`
+- shared RG contains Storage, AI Search, Container Apps Environment, Log Analytics, and Application Insights
+- companion RG contains the companion Function App and managed identity
+- blob containers and AI Search objects are named by companion to avoid collisions in shared services
+
 ## Repository structure
 
 - sync-dotnet/: .NET 8 Azure Functions timer worker that syncs SharePoint to Blob

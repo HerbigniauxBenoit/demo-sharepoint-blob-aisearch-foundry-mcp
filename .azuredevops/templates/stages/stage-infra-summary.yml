@@ -18,8 +18,6 @@ parameters:
     type: string
   - name: environment
     type: string
-  - name: projectName
-    type: string
   - name: dependsOn
     type: object
     default: []
@@ -46,7 +44,7 @@ stages:
                 echo "========================================================"
                 echo ""
                 echo "=== Identification ==="
-                echo "Projet        : ${{ parameters.projectName }}"
+                echo "Socle partage : ${{ parameters.resourceGroupName }}"
                 echo "Environnement : ${{ parameters.environment }}"
                 echo "Resource Group: ${{ parameters.resourceGroupName }}"
                 echo ""

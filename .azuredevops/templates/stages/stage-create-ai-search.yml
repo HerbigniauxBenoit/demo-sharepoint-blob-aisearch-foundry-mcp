@@ -15,8 +15,6 @@ parameters:
     default: 'basic'
   - name: environment
     type: string
-  - name: projectName
-    type: string
   - name: dependsOn
     type: object
     default: []
@@ -38,19 +36,30 @@ stages:
               scriptType: 'bash'
               scriptLocation: 'inlineScript'
               inlineScript: |
-                echo "Création d'Azure AI Search ${{ parameters.aiSearchName }}..."
-                
-                az search service create \
-                  --name "${{ parameters.aiSearchName }}" \
-                  --resource-group "${{ parameters.resourceGroupName }}" \
-                  --location "${{ parameters.location }}" \
-                  --sku "${{ parameters.aiSearchSku }}" \
-                  --partition-count 1 \
-                  --replica-count 1 \
-                  --tags \
-                    environment="${{ parameters.environment }}" \
-                    project="${{ parameters.projectName }}"
-                
-                echo "✅ Azure AI Search créé"
+                if az search service show --name "${{ parameters.aiSearchName }}" --resource-group "${{ parameters.resourceGroupName }}" &>/dev/null; then
+                  echo "ℹ️  Azure AI Search '${{ parameters.aiSearchName }}' existe déjà, mise à jour des tags"
+
+                  az search service update \
+                    --name "${{ parameters.aiSearchName }}" \
+                    --resource-group "${{ parameters.resourceGroupName }}" \
+                    --tags environment="${{ parameters.environment }}" \
+                    --only-show-errors
+
+                  echo "✅ Azure AI Search déjà existant (tags mis à jour)"
+                else
+                  echo "Création d'Azure AI Search ${{ parameters.aiSearchName }}..."
+
+                  az search service create \
+                    --name "${{ parameters.aiSearchName }}" \
+                    --resource-group "${{ parameters.resourceGroupName }}" \
+                    --location "${{ parameters.location }}" \
+                    --sku "${{ parameters.aiSearchSku }}" \
+                    --partition-count 1 \
+                    --replica-count 1 \
+                    --tags \
+                      environment="${{ parameters.environment }}"
+
+                  echo "✅ Azure AI Search créé"
+                fi
                 echo ""
                 echo "URL: https://${{ parameters.aiSearchName }}.search.windows.net"

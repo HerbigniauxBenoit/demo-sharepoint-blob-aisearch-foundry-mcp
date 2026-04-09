@@ -21,11 +21,6 @@ parameters:
       - staging
       - prod
 
-  - name: projectName
-    displayName: '📁 Nom du projet'
-    type: string
-    default: 'myproject'
-
   - name: location
     displayName: '📍 Région Azure'
     type: string
@@ -62,15 +57,15 @@ parameters:
 # -----------------------------------------------------------------------------
 variables:
   # Noms des ressources
-  resourceGroupName: 'rg-${{ parameters.projectName }}-indexer-${{ parameters.environment }}'
-  storageAccountName: 'st${{ parameters.projectName }}idx${{ parameters.environment }}'
-  aiSearchName: 'srch-${{ parameters.projectName }}-${{ parameters.environment }}'
-  containerAppsEnvName: 'cae-${{ parameters.projectName }}-${{ parameters.environment }}'
-  logAnalyticsName: 'log-${{ parameters.projectName }}-${{ parameters.environment }}'
-  appInsightsName: 'appi-${{ parameters.projectName }}-${{ parameters.environment }}'
+  resourceGroupName: 'companion-shared-${{ parameters.environment }}'
+  storageAccountName: 'stcompanionshared${{ parameters.environment }}'
+  aiSearchName: 'srch-companion-shared-${{ parameters.environment }}'
+  containerAppsEnvName: 'cae-companion-shared-${{ parameters.environment }}'
+  logAnalyticsName: 'log-companion-shared-${{ parameters.environment }}'
+  appInsightsName: 'appi-companion-shared-${{ parameters.environment }}'
   
   # Service Connection
-  azureSubscription: 'azure-service-connection'  # À adapter
+  azureSubscription: 'SVC-GPTrusted_${{ upper(parameters.environment) }}'
 
 # =============================================================================
 # STAGES
@@ -91,7 +86,7 @@ stages:
               echo "================================================"
               echo ""
               echo "=== Configuration ==="
-              echo "Projet        : ${{ parameters.projectName }}"
+              echo "Socle partage : companion-shared-${{ parameters.environment }}"
               echo "Environnement : ${{ parameters.environment }}"
               echo "Région        : ${{ parameters.location }}"
               echo ""
@@ -116,7 +111,6 @@ stages:
       resourceGroupName: $(resourceGroupName)
       location: ${{ parameters.location }}
       environment: ${{ parameters.environment }}
-      projectName: ${{ parameters.projectName }}
 
   # Stage 3 : Créer Monitoring (Log Analytics + App Insights)
   - template: templates/stages/stage-create-monitoring.yml
@@ -127,7 +121,6 @@ stages:
       logAnalyticsName: $(logAnalyticsName)
       appInsightsName: $(appInsightsName)
       environment: ${{ parameters.environment }}
-      projectName: ${{ parameters.projectName }}
       dependsOn:
         - CreateResourceGroup
 
@@ -140,7 +133,6 @@ stages:
       storageAccountName: $(storageAccountName)
       storageSku: ${{ parameters.storageSku }}
       environment: ${{ parameters.environment }}
-      projectName: ${{ parameters.projectName }}
       dependsOn:
         - CreateResourceGroup
 
@@ -153,7 +145,6 @@ stages:
       aiSearchName: $(aiSearchName)
       aiSearchSku: ${{ parameters.aiSearchSku }}
       environment: ${{ parameters.environment }}
-      projectName: ${{ parameters.projectName }}
       dependsOn:
         - CreateResourceGroup
 
@@ -166,7 +157,6 @@ stages:
       containerAppsEnvName: $(containerAppsEnvName)
       logAnalyticsName: $(logAnalyticsName)
       environment: ${{ parameters.environment }}
-      projectName: ${{ parameters.projectName }}
       dependsOn:
         - CreateMonitoring
 
@@ -181,7 +171,6 @@ stages:
       logAnalyticsName: $(logAnalyticsName)
       appInsightsName: $(appInsightsName)
       environment: ${{ parameters.environment }}
-      projectName: ${{ parameters.projectName }}
       dependsOn:
         - CreateStorageAccount
         - CreateAISearch

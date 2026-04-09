@@ -14,8 +14,6 @@ parameters:
     type: string
   - name: environment
     type: string
-  - name: projectName
-    type: string
   - name: dependsOn
     type: object
     default: []
@@ -37,18 +35,29 @@ stages:
               scriptType: 'bash'
               scriptLocation: 'inlineScript'
               inlineScript: |
-                echo "Création du Log Analytics Workspace..."
-                
-                az monitor log-analytics workspace create \
-                  --resource-group "${{ parameters.resourceGroupName }}" \
-                  --workspace-name "${{ parameters.logAnalyticsName }}" \
-                  --location "${{ parameters.location }}" \
-                  --retention-time 30 \
-                  --tags \
-                    environment="${{ parameters.environment }}" \
-                    project="${{ parameters.projectName }}"
-                
-                echo "✅ Log Analytics Workspace créé"
+                if az monitor log-analytics workspace show --resource-group "${{ parameters.resourceGroupName }}" --workspace-name "${{ parameters.logAnalyticsName }}" &>/dev/null; then
+                  echo "ℹ️  Log Analytics Workspace '${{ parameters.logAnalyticsName }}' existe déjà, mise à jour des tags"
+
+                  az monitor log-analytics workspace update \
+                    --resource-group "${{ parameters.resourceGroupName }}" \
+                    --workspace-name "${{ parameters.logAnalyticsName }}" \
+                    --set tags.environment="${{ parameters.environment }}" \
+                    --only-show-errors
+
+                  echo "✅ Log Analytics Workspace déjà existant (tags mis à jour)"
+                else
+                  echo "Création du Log Analytics Workspace..."
+
+                  az monitor log-analytics workspace create \
+                    --resource-group "${{ parameters.resourceGroupName }}" \
+                    --workspace-name "${{ parameters.logAnalyticsName }}" \
+                    --location "${{ parameters.location }}" \
+                    --retention-time 30 \
+                    --tags \
+                      environment="${{ parameters.environment }}"
+
+                  echo "✅ Log Analytics Workspace créé"
+                fi
 
       - job: CreateAppInsights
         displayName: 'Créer Application Insights'
@@ -70,17 +79,28 @@ stages:
                   --workspace-name "${{ parameters.logAnalyticsName }}" \
                   --query id -o tsv)
                 
-                echo "Création d'Application Insights..."
-                
-                az monitor app-insights component create \
-                  --app "${{ parameters.appInsightsName }}" \
-                  --resource-group "${{ parameters.resourceGroupName }}" \
-                  --location "${{ parameters.location }}" \
-                  --kind web \
-                  --application-type web \
-                  --workspace "$LAW_ID" \
-                  --tags \
-                    environment="${{ parameters.environment }}" \
-                    project="${{ parameters.projectName }}"
-                
-                echo "✅ Application Insights créé"
+                if az monitor app-insights component show --app "${{ parameters.appInsightsName }}" --resource-group "${{ parameters.resourceGroupName }}" &>/dev/null; then
+                  echo "ℹ️  Application Insights '${{ parameters.appInsightsName }}' existe déjà, mise à jour des tags"
+
+                  az monitor app-insights component update \
+                    --app "${{ parameters.appInsightsName }}" \
+                    --resource-group "${{ parameters.resourceGroupName }}" \
+                    --set tags.environment="${{ parameters.environment }}" \
+                    --only-show-errors
+
+                  echo "✅ Application Insights déjà existant (tags mis à jour)"
+                else
+                  echo "Création d'Application Insights..."
+
+                  az monitor app-insights component create \
+                    --app "${{ parameters.appInsightsName }}" \
+                    --resource-group "${{ parameters.resourceGroupName }}" \
+                    --location "${{ parameters.location }}" \
+                    --kind web \
+                    --application-type web \
+                    --workspace "$LAW_ID" \
+                    --tags \
+                      environment="${{ parameters.environment }}"
+
+                  echo "✅ Application Insights créé"
+                fi

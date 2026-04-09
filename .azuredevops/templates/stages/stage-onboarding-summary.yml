@@ -4,7 +4,9 @@
 parameters:
   - name: azureSubscription
     type: string
-  - name: resourceGroupName
+  - name: companionResourceGroupName
+    type: string
+  - name: sharedResourceGroupName
     type: string
   - name: functionAppName
     type: string
@@ -62,11 +64,13 @@ stages:
                 echo "=== Identification ==="
                 echo "Compagnon     : ${{ parameters.companionName }}"
                 echo "Environnement : ${{ parameters.environment }}"
+                echo "RG partage    : ${{ parameters.sharedResourceGroupName }}"
+                echo "RG compagnon  : ${{ parameters.companionResourceGroupName }}"
                 echo ""
 
                 APP_STATE=$(az functionapp show \
                   --name "${{ parameters.functionAppName }}" \
-                  --resource-group "${{ parameters.resourceGroupName }}" \
+                  --resource-group "${{ parameters.companionResourceGroupName }}" \
                   --query "state" -o tsv)
 
                 echo "=== Function App ==="
@@ -112,6 +116,6 @@ stages:
                 echo "========================================================"
                 echo ""
                 echo "Une fois les permissions Graph configurees, verifier les logs :"
-                echo "   az functionapp logs tail --name ${{ parameters.functionAppName }} --resource-group ${{ parameters.resourceGroupName }}"
+                echo "   az functionapp logs tail --name ${{ parameters.functionAppName }} --resource-group ${{ parameters.companionResourceGroupName }}"
                 echo ""
                 echo "========================================================"

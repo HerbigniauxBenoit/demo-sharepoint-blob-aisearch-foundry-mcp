@@ -4,7 +4,9 @@
 parameters:
   - name: azureSubscription
     type: string
-  - name: resourceGroupName
+  - name: companionResourceGroupName
+    type: string
+  - name: sharedResourceGroupName
     type: string
   - name: functionAppName
     type: string
@@ -40,6 +42,8 @@ parameters:
     type: string
   - name: companionName
     type: string
+  - name: companionExistsBehavior
+    type: string
 
 steps:
   - task: AzureCLI@2
@@ -56,22 +60,32 @@ steps:
 
         MSI_ID=$(az identity show \
           --name "${{ parameters.managedIdentityName }}" \
-          --resource-group "${{ parameters.resourceGroupName }}" \
+          --resource-group "${{ parameters.companionResourceGroupName }}" \
           --query id -o tsv)
 
         MSI_CLIENT_ID=$(az identity show \
           --name "${{ parameters.managedIdentityName }}" \
-          --resource-group "${{ parameters.resourceGroupName }}" \
+          --resource-group "${{ parameters.companionResourceGroupName }}" \
           --query clientId -o tsv)
 
         MSI_PRINCIPAL_ID=$(az identity show \
           --name "${{ parameters.managedIdentityName }}" \
-          --resource-group "${{ parameters.resourceGroupName }}" \
+          --resource-group "${{ parameters.companionResourceGroupName }}" \
           --query principalId -o tsv)
+
+        CONTAINER_ENVIRONMENT_ID=$(az containerapp env show \
+          --name "${{ parameters.containerAppsEnvName }}" \
+          --resource-group "${{ parameters.sharedResourceGroupName }}" \
+          --query id -o tsv)
+
+        STORAGE_ACCOUNT_ID=$(az storage account show \
+          --name "${{ parameters.storageAccountName }}" \
+          --resource-group "${{ parameters.sharedResourceGroupName }}" \
+          --query id -o tsv)
 
         APP_INSIGHTS_CONNECTION_STRING=$(az monitor app-insights component show \
           --app "${{ parameters.appInsightsName }}" \
-          --resource-group "${{ parameters.resourceGroupName }}" \
+          --resource-group "${{ parameters.sharedResourceGroupName }}" \
           --query connectionString -o tsv)
 
         ACR_ID=$(az acr show --name "${{ parameters.acrName }}" --query id -o tsv)
@@ -84,12 +98,17 @@ steps:
 
         IMAGE_NAME="${{ parameters.acrName }}.azurecr.io/${{ parameters.imageName }}:${{ parameters.imageTag }}"
 
-        if az functionapp show --name "${{ parameters.functionAppName }}" --resource-group "${{ parameters.resourceGroupName }}" &>/dev/null; then
+        if az functionapp show --name "${{ parameters.functionAppName }}" --resource-group "${{ parameters.companionResourceGroupName }}" &>/dev/null; then
+          if [ "${{ parameters.companionExistsBehavior }}" = "fail" ]; then
+            echo "❌ companionExistsBehavior=fail -> Function App '${{ parameters.functionAppName }}' existe déjà"
+            exit 1
+          fi
+
           echo "Function App exists, updating container image..."
 
           az functionapp config container set \
             --name "${{ parameters.functionAppName }}" \
-            --resource-group "${{ parameters.resourceGroupName }}" \
+            --resource-group "${{ parameters.companionResourceGroupName }}" \
             --image "$IMAGE_NAME" \
             --registry-server "https://${{ parameters.acrName }}.azurecr.io"
         else
@@ -97,9 +116,9 @@ steps:
 
           az functionapp create \
             --name "${{ parameters.functionAppName }}" \
-            --resource-group "${{ parameters.resourceGroupName }}" \
-            --storage-account "${{ parameters.storageAccountName }}" \
-            --environment "${{ parameters.containerAppsEnvName }}" \
+            --resource-group "${{ parameters.companionResourceGroupName }}" \
+            --storage-account "$STORAGE_ACCOUNT_ID" \
+            --environment "$CONTAINER_ENVIRONMENT_ID" \
             --functions-version 4 \
             --runtime dotnet-isolated \
             --runtime-version 8 \
@@ -108,12 +127,12 @@ steps:
 
         az functionapp identity assign \
           --name "${{ parameters.functionAppName }}" \
-          --resource-group "${{ parameters.resourceGroupName }}" \
+          --resource-group "${{ parameters.companionResourceGroupName }}" \
           --identities "$MSI_ID"
 
         az functionapp config appsettings set \
           --name "${{ parameters.functionAppName }}" \
-          --resource-group "${{ parameters.resourceGroupName }}" \
+          --resource-group "${{ parameters.companionResourceGroupName }}" \
           --settings \
             "FUNCTIONS_WORKER_RUNTIME=dotnet-isolated" \
             "SHAREPOINT_SITE_URL=${{ parameters.sharepointSiteUrl }}" \

@@ -4,7 +4,9 @@
 parameters:
   - name: azureSubscription
     type: string
-  - name: resourceGroupName
+  - name: companionResourceGroupName
+    type: string
+  - name: sharedResourceGroupName
     type: string
   - name: managedIdentityName
     type: string
@@ -26,12 +28,12 @@ steps:
         
         MSI_PRINCIPAL_ID=$(az identity show \
           --name "${{ parameters.managedIdentityName }}" \
-          --resource-group "${{ parameters.resourceGroupName }}" \
+          --resource-group "${{ parameters.companionResourceGroupName }}" \
           --query principalId -o tsv)
         
         STORAGE_ID=$(az storage account show \
           --name "${{ parameters.storageAccountName }}" \
-          --resource-group "${{ parameters.resourceGroupName }}" \
+          --resource-group "${{ parameters.sharedResourceGroupName }}" \
           --query id -o tsv)
         
         echo "MSI Principal ID : $MSI_PRINCIPAL_ID"
@@ -39,13 +41,23 @@ steps:
         echo ""
         
         for ROLE in "Storage Blob Data Owner" "Storage Queue Data Contributor" "Storage Table Data Contributor"; do
-          echo "Assignation de '$ROLE'..."
-          az role assignment create \
+          EXISTING_COUNT=$(az role assignment list \
             --assignee "$MSI_PRINCIPAL_ID" \
-            --role "$ROLE" \
             --scope "$STORAGE_ID" \
-            --only-show-errors || echo "ℹ️  Rôle peut-être déjà assigné"
-          echo "✅ $ROLE"
+            --query "[?roleDefinitionName=='$ROLE'] | length(@)" \
+            -o tsv)
+
+          if [ "$EXISTING_COUNT" != "0" ]; then
+            echo "ℹ️  Rôle '$ROLE' déjà assigné"
+          else
+            echo "Assignation de '$ROLE'..."
+            az role assignment create \
+              --assignee "$MSI_PRINCIPAL_ID" \
+              --role "$ROLE" \
+              --scope "$STORAGE_ID" \
+              --only-show-errors
+            echo "✅ $ROLE assigné"
+          fi
         done
         
         echo ""

@@ -10,12 +10,14 @@ parameters:
     type: string
   - name: environment
     type: string
-  - name: projectName
-    type: string
+  - name: dependsOn
+    type: object
+    default: []
 
 stages:
   - stage: CreateResourceGroup
     displayName: '📁 Créer Resource Group'
+    dependsOn: ${{ parameters.dependsOn }}
     jobs:
       - job: CreateRG
         displayName: 'Créer le Resource Group'
@@ -36,7 +38,6 @@ stages:
                   --location "${{ parameters.location }}" \
                   --tags \
                     environment="${{ parameters.environment }}" \
-                    project="${{ parameters.projectName }}" \
                     managedBy="azure-devops"
                 
                 echo "✅ Resource Group créé"

@@ -8,9 +8,9 @@ parameters:
     type: string
   - name: companionName
     type: string
-  - name: projectName
+  - name: sharedResourceGroupName
     type: string
-  - name: resourceGroupName
+  - name: companionResourceGroupName
     type: string
   - name: storageAccountName
     type: string
@@ -44,6 +44,8 @@ parameters:
     type: string
   - name: syncPermissions
     type: string
+  - name: companionExistsBehavior
+    type: string
 
 stages:
   - stage: Validation
@@ -62,7 +64,6 @@ stages:
               echo "=== Identification ==="
               echo "Compagnon        : ${{ parameters.companionName }}"
               echo "Environnement    : ${{ parameters.environment }}"
-              echo "Projet           : ${{ parameters.projectName }}"
               echo ""
               echo "=== SharePoint (Source) ==="
               echo "Site URL         : ${{ parameters.sharepointSiteUrl }}"
@@ -78,6 +79,8 @@ stages:
               echo "Image            : ${{ parameters.acrName }}.azurecr.io/${{ parameters.imageName }}:${{ parameters.imageTag }}"
               echo ""
               echo "=== Ressources à créer ==="
+              echo "RG partagé       : ${{ parameters.sharedResourceGroupName }}"
+              echo "RG compagnon     : ${{ parameters.companionResourceGroupName }}"
               echo "MSI              : ${{ parameters.managedIdentityName }}"
               echo "Function App     : ${{ parameters.functionAppName }}"
               echo "Blob Container   : ${{ parameters.blobContainerName }}"
@@ -88,7 +91,7 @@ stages:
           - template: ../steps/step-verify-shared-resources.yml
             parameters:
               azureSubscription: ${{ parameters.azureSubscription }}
-              resourceGroupName: ${{ parameters.resourceGroupName }}
+              sharedResourceGroupName: ${{ parameters.sharedResourceGroupName }}
               storageAccountName: ${{ parameters.storageAccountName }}
               aiSearchName: ${{ parameters.aiSearchName }}
               containerAppsEnvName: ${{ parameters.containerAppsEnvName }}
@@ -100,9 +103,13 @@ stages:
               scriptType: 'bash'
               scriptLocation: 'inlineScript'
               inlineScript: |
-                if az functionapp show --name "${{ parameters.functionAppName }}" --resource-group "${{ parameters.resourceGroupName }}" &>/dev/null; then
+                if az functionapp show --name "${{ parameters.functionAppName }}" --resource-group "${{ parameters.companionResourceGroupName }}" &>/dev/null; then
                   echo "⚠️  ATTENTION: Function App '${{ parameters.functionAppName }}' existe déjà"
-                  echo "   La pipeline va mettre à jour la configuration existante"
+                  if [ "${{ parameters.companionExistsBehavior }}" = "fail" ]; then
+                    echo "❌ companionExistsBehavior=fail -> arrêt demandé si le companion existe déjà"
+                    exit 1
+                  fi
+                  echo "   companionExistsBehavior=update -> la pipeline va mettre à jour la configuration existante"
                 else
                   echo "✅ Function App n'existe pas encore (création)"
                 fi

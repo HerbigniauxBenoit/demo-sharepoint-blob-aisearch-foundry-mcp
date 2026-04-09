@@ -15,8 +15,6 @@ parameters:
     default: 'Standard_LRS'
   - name: environment
     type: string
-  - name: projectName
-    type: string
   - name: dependsOn
     type: object
     default: []
@@ -38,20 +36,31 @@ stages:
               scriptType: 'bash'
               scriptLocation: 'inlineScript'
               inlineScript: |
-                echo "Création du Storage Account ${{ parameters.storageAccountName }}..."
-                
-                az storage account create \
-                  --name "${{ parameters.storageAccountName }}" \
-                  --resource-group "${{ parameters.resourceGroupName }}" \
-                  --location "${{ parameters.location }}" \
-                  --sku "${{ parameters.storageSku }}" \
-                  --kind StorageV2 \
-                  --access-tier Hot \
-                  --min-tls-version TLS1_2 \
-                  --allow-blob-public-access false \
-                  --tags \
-                    environment="${{ parameters.environment }}" \
-                    project="${{ parameters.projectName }}" \
-                    purpose="indexation"
-                
-                echo "✅ Storage Account créé"
+                if az storage account show --name "${{ parameters.storageAccountName }}" --resource-group "${{ parameters.resourceGroupName }}" &>/dev/null; then
+                  echo "ℹ️  Storage Account '${{ parameters.storageAccountName }}' existe déjà, mise à jour des tags"
+
+                  az storage account update \
+                    --name "${{ parameters.storageAccountName }}" \
+                    --resource-group "${{ parameters.resourceGroupName }}" \
+                    --set tags.environment="${{ parameters.environment }}" tags.purpose="indexation" \
+                    --only-show-errors
+
+                  echo "✅ Storage Account déjà existant (tags mis à jour)"
+                else
+                  echo "Création du Storage Account ${{ parameters.storageAccountName }}..."
+
+                  az storage account create \
+                    --name "${{ parameters.storageAccountName }}" \
+                    --resource-group "${{ parameters.resourceGroupName }}" \
+                    --location "${{ parameters.location }}" \
+                    --sku "${{ parameters.storageSku }}" \
+                    --kind StorageV2 \
+                    --access-tier Hot \
+                    --min-tls-version TLS1_2 \
+                    --allow-blob-public-access false \
+                    --tags \
+                      environment="${{ parameters.environment }}" \
+                      purpose="indexation"
+
+                  echo "✅ Storage Account créé"
+                fi

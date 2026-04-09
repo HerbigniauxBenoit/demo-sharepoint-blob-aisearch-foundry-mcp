@@ -4,7 +4,9 @@
 parameters:
   - name: azureSubscription
     type: string
-  - name: resourceGroupName
+  - name: companionResourceGroupName
+    type: string
+  - name: sharedResourceGroupName
     type: string
   - name: managedIdentityName
     type: string
@@ -23,18 +25,28 @@ steps:
         
         MSI_PRINCIPAL_ID=$(az identity show \
           --name "${{ parameters.managedIdentityName }}" \
-          --resource-group "${{ parameters.resourceGroupName }}" \
+          --resource-group "${{ parameters.companionResourceGroupName }}" \
           --query principalId -o tsv)
         
         SEARCH_ID=$(az search service show \
           --name "${{ parameters.aiSearchName }}" \
-          --resource-group "${{ parameters.resourceGroupName }}" \
+          --resource-group "${{ parameters.sharedResourceGroupName }}" \
           --query id -o tsv)
-        
-        az role assignment create \
+
+        EXISTING_COUNT=$(az role assignment list \
           --assignee "$MSI_PRINCIPAL_ID" \
-          --role "Search Index Data Contributor" \
           --scope "$SEARCH_ID" \
-          --only-show-errors || echo "ℹ️  Rôle peut-être déjà assigné"
-        
-        echo "✅ Search Index Data Contributor assigné"
+          --query "[?roleDefinitionName=='Search Index Data Contributor'] | length(@)" \
+          -o tsv)
+
+        if [ "$EXISTING_COUNT" != "0" ]; then
+          echo "ℹ️  Rôle Search Index Data Contributor déjà assigné"
+        else
+          az role assignment create \
+            --assignee "$MSI_PRINCIPAL_ID" \
+            --role "Search Index Data Contributor" \
+            --scope "$SEARCH_ID" \
+            --only-show-errors
+
+          echo "✅ Search Index Data Contributor assigné"
+        fi

@@ -14,8 +14,6 @@ parameters:
     type: string
   - name: environment
     type: string
-  - name: projectName
-    type: string
   - name: dependsOn
     type: object
     default: []
@@ -37,28 +35,39 @@ stages:
               scriptType: 'bash'
               scriptLocation: 'inlineScript'
               inlineScript: |
-                echo "Récupération des informations Log Analytics..."
-                
-                LAW_ID=$(az monitor log-analytics workspace show \
-                  --resource-group "${{ parameters.resourceGroupName }}" \
-                  --workspace-name "${{ parameters.logAnalyticsName }}" \
-                  --query customerId -o tsv)
-                
-                LAW_KEY=$(az monitor log-analytics workspace get-shared-keys \
-                  --resource-group "${{ parameters.resourceGroupName }}" \
-                  --workspace-name "${{ parameters.logAnalyticsName }}" \
-                  --query primarySharedKey -o tsv)
-                
-                echo "Création du Container Apps Environment..."
-                
-                az containerapp env create \
-                  --name "${{ parameters.containerAppsEnvName }}" \
-                  --resource-group "${{ parameters.resourceGroupName }}" \
-                  --location "${{ parameters.location }}" \
-                  --logs-workspace-id "$LAW_ID" \
-                  --logs-workspace-key "$LAW_KEY" \
-                  --tags \
-                    environment="${{ parameters.environment }}" \
-                    project="${{ parameters.projectName }}"
-                
-                echo "✅ Container Apps Environment créé"
+                if az containerapp env show --name "${{ parameters.containerAppsEnvName }}" --resource-group "${{ parameters.resourceGroupName }}" &>/dev/null; then
+                  echo "ℹ️  Container Apps Environment '${{ parameters.containerAppsEnvName }}' existe déjà, mise à jour des tags"
+
+                  az containerapp env update \
+                    --name "${{ parameters.containerAppsEnvName }}" \
+                    --resource-group "${{ parameters.resourceGroupName }}" \
+                    --tags environment="${{ parameters.environment }}" \
+                    --only-show-errors
+
+                  echo "✅ Container Apps Environment déjà existant (tags mis à jour)"
+                else
+                  echo "Récupération des informations Log Analytics..."
+
+                  LAW_ID=$(az monitor log-analytics workspace show \
+                    --resource-group "${{ parameters.resourceGroupName }}" \
+                    --workspace-name "${{ parameters.logAnalyticsName }}" \
+                    --query customerId -o tsv)
+
+                  LAW_KEY=$(az monitor log-analytics workspace get-shared-keys \
+                    --resource-group "${{ parameters.resourceGroupName }}" \
+                    --workspace-name "${{ parameters.logAnalyticsName }}" \
+                    --query primarySharedKey -o tsv)
+
+                  echo "Création du Container Apps Environment..."
+
+                  az containerapp env create \
+                    --name "${{ parameters.containerAppsEnvName }}" \
+                    --resource-group "${{ parameters.resourceGroupName }}" \
+                    --location "${{ parameters.location }}" \
+                    --logs-workspace-id "$LAW_ID" \
+                    --logs-workspace-key "$LAW_KEY" \
+                    --tags \
+                      environment="${{ parameters.environment }}"
+
+                  echo "✅ Container Apps Environment créé"
+                fi
