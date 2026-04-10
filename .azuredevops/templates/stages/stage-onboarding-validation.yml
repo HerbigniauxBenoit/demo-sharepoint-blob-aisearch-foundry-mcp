@@ -92,6 +92,30 @@ stages:
               containerAppsEnvName: ${{ parameters.containerAppsEnvName }}
 
           - task: AzureCLI@2
+            displayName: '🐳 Vérifier l''image ACR'
+            inputs:
+              azureSubscription: ${{ parameters.azureSubscription }}
+              scriptType: 'bash'
+              scriptLocation: 'inlineScript'
+              inlineScript: |
+                echo "Vérification de l'image dans ACR..."
+
+                if ! az acr show --name "${{ parameters.acrName }}" &>/dev/null; then
+                  echo "❌ ERREUR: ACR '${{ parameters.acrName }}' introuvable"
+                  exit 1
+                fi
+
+                if ! az acr repository show \
+                  --name "${{ parameters.acrName }}" \
+                  --image "${{ parameters.imageName }}:${{ parameters.imageTag }}" &>/dev/null; then
+                  echo "❌ ERREUR: Image '${{ parameters.imageName }}:${{ parameters.imageTag }}' absente dans '${{ parameters.acrName }}'"
+                  echo "   → Exécutez d'abord la pipeline CI/CD ou corrigez le tag imageTag"
+                  exit 1
+                fi
+
+                echo "✅ Image trouvée: ${{ parameters.acrName }}.azurecr.io/${{ parameters.imageName }}:${{ parameters.imageTag }}"
+
+          - task: AzureCLI@2
             displayName: '🔍 Vérifier si la Function App existe déjà'
             inputs:
               azureSubscription: ${{ parameters.azureSubscription }}

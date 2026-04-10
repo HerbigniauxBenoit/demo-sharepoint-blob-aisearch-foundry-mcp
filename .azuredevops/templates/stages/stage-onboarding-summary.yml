@@ -113,6 +113,6 @@ stages:
                 echo "========================================================"
                 echo ""
                 echo "Une fois les permissions Graph configurees, verifier les logs :"
-                echo "   az functionapp logs tail --name ${{ parameters.functionAppName }} --resource-group ${{ parameters.sharedResourceGroupName }}"
+                echo "   az containerapp logs show --name ${{ parameters.functionAppName }} --resource-group ${{ parameters.sharedResourceGroupName }} --follow"
                 echo ""
                 echo "========================================================"
