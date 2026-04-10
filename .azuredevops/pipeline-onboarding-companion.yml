@@ -70,27 +70,18 @@ parameters:
     type: string
     default: 'latest'
 
-  - name: companionExistsBehavior
-    displayName: '♻️ Si le companion existe déjà'
-    type: string
-    default: 'update'
-    values:
-      - update
-      - fail
-
 # -----------------------------------------------------------------------------
 # Variables
 # -----------------------------------------------------------------------------
 variables:
   # Ressources partagées
-  sharedResourceGroupName: 'companion-shared-${{ parameters.environment }}'
+  sharedResourceGroupName: 'rg-companion-${{ parameters.environment }}'
   storageAccountName: 'stcompanionshared${{ parameters.environment }}'
   aiSearchName: 'srch-companion-shared-${{ parameters.environment }}'
   containerAppsEnvName: 'cae-companion-shared-${{ parameters.environment }}'
   appInsightsName: 'appi-companion-shared-${{ parameters.environment }}'
   
-  # Ressources du compagnon
-  companionResourceGroupName: 'rg-companion'
+  # Ressources du compagnon (dans le même RG partagé)
   managedIdentityName: 'id-${{ parameters.companionName }}-${{ parameters.environment }}'
   functionAppName: 'func-${{ parameters.companionName }}-sync-${{ parameters.environment }}'
   blobContainerName: '${{ parameters.companionName }}'
@@ -99,7 +90,7 @@ variables:
   aiSearchIndexerName: 'idxr-${{ parameters.companionName }}'
   
   # ACR
-  acrName: 'acrmycompany'  # À adapter
+  acrName: 'acrcompanion${{ parameters.environment }}'
   imageName: 'sharepoint-sync'
   
   # Service Connection
@@ -116,7 +107,6 @@ stages:
       environment: ${{ parameters.environment }}
       companionName: ${{ parameters.companionName }}
       sharedResourceGroupName: $(sharedResourceGroupName)
-      companionResourceGroupName: $(companionResourceGroupName)
       storageAccountName: $(storageAccountName)
       aiSearchName: $(aiSearchName)
       containerAppsEnvName: $(containerAppsEnvName)
@@ -133,30 +123,19 @@ stages:
       syncSchedule: ${{ parameters.syncSchedule }}
       deleteOrphanedBlobs: ${{ parameters.deleteOrphanedBlobs }}
       syncPermissions: ${{ parameters.syncPermissions }}
-      companionExistsBehavior: ${{ parameters.companionExistsBehavior }}
 
-  # Stage 2 : Créer Resource Group compagnon
-  - template: templates/stages/stage-create-resource-group.yml
-    parameters:
-      azureSubscription: $(azureSubscription)
-      resourceGroupName: $(companionResourceGroupName)
-      location: ${{ parameters.location }}
-      environment: ${{ parameters.environment }}
-      dependsOn:
-        - Validation
-
-  # Stage 3 : Créer MSI
+  # Stage 2 : Créer MSI
   - template: templates/stages/stage-create-msi.yml
     parameters:
       azureSubscription: $(azureSubscription)
-      resourceGroupName: $(companionResourceGroupName)
+      resourceGroupName: $(sharedResourceGroupName)
       managedIdentityName: $(managedIdentityName)
       environment: ${{ parameters.environment }}
       companionName: ${{ parameters.companionName }}
       dependsOn:
-        - CreateResourceGroup
+        - Validation
 
-  # Stage 4 : Créer Container Blob
+  # Stage 3 : Créer Container Blob
   - template: templates/stages/stage-create-blob-container.yml
     parameters:
       azureSubscription: $(azureSubscription)
@@ -166,7 +145,7 @@ stages:
       dependsOn:
         - Validation
 
-  # Stage 5 : Configurer AI Search
+  # Stage 4 : Configurer AI Search
   - template: templates/stages/stage-configure-ai-search.yml
     parameters:
       azureSubscription: $(azureSubscription)
@@ -181,11 +160,10 @@ stages:
       dependsOn:
         - CreateBlobContainer
 
-  # Stage 6 : Assigner RBAC
+  # Stage 5 : Assigner RBAC
   - template: templates/stages/stage-assign-rbac.yml
     parameters:
       azureSubscription: $(azureSubscription)
-      companionResourceGroupName: $(companionResourceGroupName)
       sharedResourceGroupName: $(sharedResourceGroupName)
       managedIdentityName: $(managedIdentityName)
       storageAccountName: $(storageAccountName)
@@ -194,11 +172,10 @@ stages:
         - CreateManagedIdentity
         - CreateBlobContainer
 
-  # Stage 7 : Déployer Container App
+  # Stage 6 : Déployer Container App
   - template: templates/stages/stage-deploy-container-app.yml
     parameters:
       azureSubscription: $(azureSubscription)
-      companionResourceGroupName: $(companionResourceGroupName)
       sharedResourceGroupName: $(sharedResourceGroupName)
       functionAppName: $(functionAppName)
       containerAppsEnvName: $(containerAppsEnvName)
@@ -217,16 +194,14 @@ stages:
       syncPermissions: ${{ parameters.syncPermissions }}
       environment: ${{ parameters.environment }}
       companionName: ${{ parameters.companionName }}
-      companionExistsBehavior: ${{ parameters.companionExistsBehavior }}
       dependsOn:
         - AssignRBAC
         - ConfigureAISearch
 
-  # Stage 8 : Résumé
+  # Stage 7 : Résumé
   - template: templates/stages/stage-onboarding-summary.yml
     parameters:
       azureSubscription: $(azureSubscription)
-      companionResourceGroupName: $(companionResourceGroupName)
       sharedResourceGroupName: $(sharedResourceGroupName)
       functionAppName: $(functionAppName)
       managedIdentityName: $(managedIdentityName)

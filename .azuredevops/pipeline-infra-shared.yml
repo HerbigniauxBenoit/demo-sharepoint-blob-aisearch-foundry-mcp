@@ -52,17 +52,27 @@ parameters:
       - Standard_GRS
       - Standard_ZRS
 
+  - name: acrSku
+    displayName: '🐳 SKU Azure Container Registry'
+    type: string
+    default: 'Basic'
+    values:
+      - Basic
+      - Standard
+      - Premium
+
 # -----------------------------------------------------------------------------
 # Variables
 # -----------------------------------------------------------------------------
 variables:
   # Noms des ressources
-  resourceGroupName: 'companion-shared-${{ parameters.environment }}'
+  resourceGroupName: 'rg-companion-${{ parameters.environment }}'
   storageAccountName: 'stcompanionshared${{ parameters.environment }}'
   aiSearchName: 'srch-companion-shared-${{ parameters.environment }}'
   containerAppsEnvName: 'cae-companion-shared-${{ parameters.environment }}'
   logAnalyticsName: 'log-companion-shared-${{ parameters.environment }}'
   appInsightsName: 'appi-companion-shared-${{ parameters.environment }}'
+  acrName: 'acrcompanion${{ parameters.environment }}'
   
   # Service Connection
   azureSubscription: 'SVC-GPTrusted_${{ upper(parameters.environment) }}'
@@ -86,7 +96,7 @@ stages:
               echo "================================================"
               echo ""
               echo "=== Configuration ==="
-              echo "Socle partage : companion-shared-${{ parameters.environment }}"
+              echo "Socle partage : rg-companion-${{ parameters.environment }}"
               echo "Environnement : ${{ parameters.environment }}"
               echo "Région        : ${{ parameters.location }}"
               echo ""
@@ -97,10 +107,12 @@ stages:
               echo "Container Apps Env : $(containerAppsEnvName)"
               echo "Log Analytics      : $(logAnalyticsName)"
               echo "App Insights       : $(appInsightsName)"
+              echo "ACR                : $(acrName)"
               echo ""
               echo "=== SKUs ==="
               echo "AI Search : ${{ parameters.aiSearchSku }}"
               echo "Storage   : ${{ parameters.storageSku }}"
+              echo "ACR       : ${{ parameters.acrSku }}"
               echo ""
             displayName: '📋 Afficher les paramètres'
 
@@ -160,7 +172,19 @@ stages:
       dependsOn:
         - CreateMonitoring
 
-  # Stage 7 : Résumé
+  # Stage 7 : Créer Azure Container Registry
+  - template: templates/stages/stage-create-acr.yml
+    parameters:
+      azureSubscription: $(azureSubscription)
+      resourceGroupName: $(resourceGroupName)
+      location: ${{ parameters.location }}
+      acrName: $(acrName)
+      acrSku: ${{ parameters.acrSku }}
+      environment: ${{ parameters.environment }}
+      dependsOn:
+        - CreateResourceGroup
+
+  # Stage 8 : Résumé
   - template: templates/stages/stage-infra-summary.yml
     parameters:
       azureSubscription: $(azureSubscription)
@@ -170,8 +194,10 @@ stages:
       containerAppsEnvName: $(containerAppsEnvName)
       logAnalyticsName: $(logAnalyticsName)
       appInsightsName: $(appInsightsName)
+      acrName: $(acrName)
       environment: ${{ parameters.environment }}
       dependsOn:
         - CreateStorageAccount
         - CreateAISearch
         - CreateContainerAppsEnv
+        - CreateAzureContainerRegistry

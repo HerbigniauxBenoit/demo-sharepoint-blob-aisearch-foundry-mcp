@@ -16,6 +16,8 @@ parameters:
     type: string
   - name: appInsightsName
     type: string
+  - name: acrName
+    type: string
   - name: environment
     type: string
   - name: dependsOn
@@ -54,12 +56,14 @@ stages:
                 echo "├── Azure AI Search     : ${{ parameters.aiSearchName }}"
                 echo "├── Container Apps Env  : ${{ parameters.containerAppsEnvName }}"
                 echo "├── Log Analytics       : ${{ parameters.logAnalyticsName }}"
-                echo "└── Application Insights: ${{ parameters.appInsightsName }}"
+                echo "├── Application Insights: ${{ parameters.appInsightsName }}"
+                echo "└── Container Registry  : ${{ parameters.acrName }}"
                 echo ""
                 
                 echo "=== URLs ==="
                 echo "Storage     : https://${{ parameters.storageAccountName }}.blob.core.windows.net"
                 echo "AI Search   : https://${{ parameters.aiSearchName }}.search.windows.net"
+                echo "ACR         : https://${{ parameters.acrName }}.azurecr.io"
                 echo ""
                 
                 echo "========================================================"

@@ -4,8 +4,6 @@
 parameters:
   - name: azureSubscription
     type: string
-  - name: companionResourceGroupName
-    type: string
   - name: sharedResourceGroupName
     type: string
   - name: functionAppName
@@ -65,13 +63,12 @@ stages:
                 echo "Compagnon     : ${{ parameters.companionName }}"
                 echo "Environnement : ${{ parameters.environment }}"
                 echo "RG partage    : ${{ parameters.sharedResourceGroupName }}"
-                echo "RG compagnon  : ${{ parameters.companionResourceGroupName }}"
                 echo ""
 
-                APP_STATE=$(az functionapp show \
+                APP_STATE=$(az containerapp show \
                   --name "${{ parameters.functionAppName }}" \
-                  --resource-group "${{ parameters.companionResourceGroupName }}" \
-                  --query "state" -o tsv)
+                  --resource-group "${{ parameters.sharedResourceGroupName }}" \
+                  --query "properties.runningStatus" -o tsv)
 
                 echo "=== Function App ==="
                 echo "Name  : ${{ parameters.functionAppName }}"
@@ -116,6 +113,6 @@ stages:
                 echo "========================================================"
                 echo ""
                 echo "Une fois les permissions Graph configurees, verifier les logs :"
-                echo "   az functionapp logs tail --name ${{ parameters.functionAppName }} --resource-group ${{ parameters.companionResourceGroupName }}"
+                echo "   az functionapp logs tail --name ${{ parameters.functionAppName }} --resource-group ${{ parameters.sharedResourceGroupName }}"
                 echo ""
                 echo "========================================================"

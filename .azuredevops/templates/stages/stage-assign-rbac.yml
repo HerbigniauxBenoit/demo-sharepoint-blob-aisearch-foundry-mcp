@@ -4,8 +4,6 @@
 parameters:
   - name: azureSubscription
     type: string
-  - name: companionResourceGroupName
-    type: string
   - name: sharedResourceGroupName
     type: string
   - name: managedIdentityName
@@ -31,7 +29,6 @@ stages:
           - template: ../steps/step-assign-rbac-storage.yml
             parameters:
               azureSubscription: ${{ parameters.azureSubscription }}
-              companionResourceGroupName: ${{ parameters.companionResourceGroupName }}
               sharedResourceGroupName: ${{ parameters.sharedResourceGroupName }}
               managedIdentityName: ${{ parameters.managedIdentityName }}
               storageAccountName: ${{ parameters.storageAccountName }}
@@ -44,7 +41,6 @@ stages:
           - template: ../steps/step-assign-rbac-ai-search.yml
             parameters:
               azureSubscription: ${{ parameters.azureSubscription }}
-              companionResourceGroupName: ${{ parameters.companionResourceGroupName }}
               sharedResourceGroupName: ${{ parameters.sharedResourceGroupName }}
               managedIdentityName: ${{ parameters.managedIdentityName }}
               aiSearchName: ${{ parameters.aiSearchName }}

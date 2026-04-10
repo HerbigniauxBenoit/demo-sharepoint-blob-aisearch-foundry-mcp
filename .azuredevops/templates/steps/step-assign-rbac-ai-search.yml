@@ -4,8 +4,6 @@
 parameters:
   - name: azureSubscription
     type: string
-  - name: companionResourceGroupName
-    type: string
   - name: sharedResourceGroupName
     type: string
   - name: managedIdentityName
@@ -25,7 +23,7 @@ steps:
         
         MSI_PRINCIPAL_ID=$(az identity show \
           --name "${{ parameters.managedIdentityName }}" \
-          --resource-group "${{ parameters.companionResourceGroupName }}" \
+          --resource-group "${{ parameters.sharedResourceGroupName }}" \
           --query principalId -o tsv)
         
         SEARCH_ID=$(az search service show \

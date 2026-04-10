@@ -4,8 +4,6 @@
 parameters:
   - name: azureSubscription
     type: string
-  - name: companionResourceGroupName
-    type: string
   - name: sharedResourceGroupName
     type: string
   - name: functionAppName
@@ -42,8 +40,6 @@ parameters:
     type: string
   - name: companionName
     type: string
-  - name: companionExistsBehavior
-    type: string
 
 steps:
   - task: AzureCLI@2
@@ -60,17 +56,17 @@ steps:
 
         MSI_ID=$(az identity show \
           --name "${{ parameters.managedIdentityName }}" \
-          --resource-group "${{ parameters.companionResourceGroupName }}" \
+          --resource-group "${{ parameters.sharedResourceGroupName }}" \
           --query id -o tsv)
 
         MSI_CLIENT_ID=$(az identity show \
           --name "${{ parameters.managedIdentityName }}" \
-          --resource-group "${{ parameters.companionResourceGroupName }}" \
+          --resource-group "${{ parameters.sharedResourceGroupName }}" \
           --query clientId -o tsv)
 
         MSI_PRINCIPAL_ID=$(az identity show \
           --name "${{ parameters.managedIdentityName }}" \
-          --resource-group "${{ parameters.companionResourceGroupName }}" \
+          --resource-group "${{ parameters.sharedResourceGroupName }}" \
           --query principalId -o tsv)
 
         CONTAINER_ENVIRONMENT_ID=$(az containerapp env show \
@@ -98,17 +94,12 @@ steps:
 
         IMAGE_NAME="${{ parameters.acrName }}.azurecr.io/${{ parameters.imageName }}:${{ parameters.imageTag }}"
 
-        if az functionapp show --name "${{ parameters.functionAppName }}" --resource-group "${{ parameters.companionResourceGroupName }}" &>/dev/null; then
-          if [ "${{ parameters.companionExistsBehavior }}" = "fail" ]; then
-            echo "❌ companionExistsBehavior=fail -> Function App '${{ parameters.functionAppName }}' existe déjà"
-            exit 1
-          fi
-
-          echo "Function App exists, updating container image..."
+        if az containerapp show --name "${{ parameters.functionAppName }}" --resource-group "${{ parameters.sharedResourceGroupName }}" &>/dev/null; then
+          echo "Function App existe, mise à jour de l'image..."
 
           az functionapp config container set \
             --name "${{ parameters.functionAppName }}" \
-            --resource-group "${{ parameters.companionResourceGroupName }}" \
+            --resource-group "${{ parameters.sharedResourceGroupName }}" \
             --image "$IMAGE_NAME" \
             --registry-server "https://${{ parameters.acrName }}.azurecr.io"
         else
@@ -116,7 +107,7 @@ steps:
 
           az functionapp create \
             --name "${{ parameters.functionAppName }}" \
-            --resource-group "${{ parameters.companionResourceGroupName }}" \
+            --resource-group "${{ parameters.sharedResourceGroupName }}" \
             --storage-account "$STORAGE_ACCOUNT_ID" \
             --environment "$CONTAINER_ENVIRONMENT_ID" \
             --functions-version 4 \
@@ -127,12 +118,12 @@ steps:
 
         az functionapp identity assign \
           --name "${{ parameters.functionAppName }}" \
-          --resource-group "${{ parameters.companionResourceGroupName }}" \
+          --resource-group "${{ parameters.sharedResourceGroupName }}" \
           --identities "$MSI_ID"
 
         az functionapp config appsettings set \
           --name "${{ parameters.functionAppName }}" \
-          --resource-group "${{ parameters.companionResourceGroupName }}" \
+          --resource-group "${{ parameters.sharedResourceGroupName }}" \
           --settings \
             "FUNCTIONS_WORKER_RUNTIME=dotnet-isolated" \
             "SHAREPOINT_SITE_URL=${{ parameters.sharepointSiteUrl }}" \

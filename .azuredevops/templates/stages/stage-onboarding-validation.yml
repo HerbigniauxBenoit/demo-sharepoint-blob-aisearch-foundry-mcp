@@ -10,8 +10,6 @@ parameters:
     type: string
   - name: sharedResourceGroupName
     type: string
-  - name: companionResourceGroupName
-    type: string
   - name: storageAccountName
     type: string
   - name: aiSearchName
@@ -43,8 +41,6 @@ parameters:
   - name: deleteOrphanedBlobs
     type: string
   - name: syncPermissions
-    type: string
-  - name: companionExistsBehavior
     type: string
 
 stages:
@@ -80,7 +76,6 @@ stages:
               echo ""
               echo "=== Ressources à créer ==="
               echo "RG partagé       : ${{ parameters.sharedResourceGroupName }}"
-              echo "RG compagnon     : ${{ parameters.companionResourceGroupName }}"
               echo "MSI              : ${{ parameters.managedIdentityName }}"
               echo "Function App     : ${{ parameters.functionAppName }}"
               echo "Blob Container   : ${{ parameters.blobContainerName }}"
@@ -103,13 +98,8 @@ stages:
               scriptType: 'bash'
               scriptLocation: 'inlineScript'
               inlineScript: |
-                if az functionapp show --name "${{ parameters.functionAppName }}" --resource-group "${{ parameters.companionResourceGroupName }}" &>/dev/null; then
-                  echo "⚠️  ATTENTION: Function App '${{ parameters.functionAppName }}' existe déjà"
-                  if [ "${{ parameters.companionExistsBehavior }}" = "fail" ]; then
-                    echo "❌ companionExistsBehavior=fail -> arrêt demandé si le companion existe déjà"
-                    exit 1
-                  fi
-                  echo "   companionExistsBehavior=update -> la pipeline va mettre à jour la configuration existante"
+                if az containerapp show --name "${{ parameters.functionAppName }}" --resource-group "${{ parameters.sharedResourceGroupName }}" &>/dev/null; then
+                  echo "⚠️  Function App '${{ parameters.functionAppName }}' existe déjà -> mise à jour de l'image et de la configuration"
                 else
                   echo "✅ Function App n'existe pas encore (création)"
                 fi

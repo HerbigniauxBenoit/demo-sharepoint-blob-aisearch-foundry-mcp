@@ -1,0 +1,66 @@
+# =============================================================================
+# Stage Template : Créer Azure Container Registry
+# =============================================================================
+parameters:
+  - name: azureSubscription
+    type: string
+  - name: resourceGroupName
+    type: string
+  - name: location
+    type: string
+  - name: acrName
+    type: string
+  - name: acrSku
+    type: string
+    default: 'Basic'
+  - name: environment
+    type: string
+  - name: dependsOn
+    type: object
+    default: []
+
+stages:
+  - stage: CreateAzureContainerRegistry
+    displayName: '🐳 Créer Azure Container Registry'
+    dependsOn: ${{ parameters.dependsOn }}
+    jobs:
+      - job: CreateACR
+        displayName: 'Créer le Container Registry'
+        pool:
+          vmImage: 'ubuntu-latest'
+        steps:
+          - task: AzureCLI@2
+            displayName: '🐳 az acr create'
+            inputs:
+              azureSubscription: ${{ parameters.azureSubscription }}
+              scriptType: 'bash'
+              scriptLocation: 'inlineScript'
+              inlineScript: |
+                if az acr show \
+                     --name "${{ parameters.acrName }}" \
+                     --resource-group "${{ parameters.resourceGroupName }}" &>/dev/null; then
+                  echo "ℹ️  Azure Container Registry '${{ parameters.acrName }}' existe déjà, mise à jour des tags"
+
+                  az acr update \
+                    --name "${{ parameters.acrName }}" \
+                    --resource-group "${{ parameters.resourceGroupName }}" \
+                    --tags \
+                      environment="${{ parameters.environment }}" \
+                      purpose="companion-images"
+
+                  echo "✅ Azure Container Registry déjà existant (tags mis à jour)"
+                else
+                  echo "Création de l'Azure Container Registry ${{ parameters.acrName }}..."
+
+                  az acr create \
+                    --name "${{ parameters.acrName }}" \
+                    --resource-group "${{ parameters.resourceGroupName }}" \
+                    --location "${{ parameters.location }}" \
+                    --sku "${{ parameters.acrSku }}" \
+                    --admin-enabled false \
+                    --tags \
+                      environment="${{ parameters.environment }}" \
+                      purpose="companion-images"
+
+                  echo "✅ Azure Container Registry créé"
+                fi
