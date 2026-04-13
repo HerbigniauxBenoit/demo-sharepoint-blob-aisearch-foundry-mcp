@@ -110,7 +110,7 @@ stages:
                   --name "${{ parameters.acrName }}" \
                   --image "${{ parameters.imageName }}:${{ parameters.imageTag }}" &>/dev/null; then
                   echo "❌ ERREUR: Image '${{ parameters.imageName }}:${{ parameters.imageTag }}' absente dans '${{ parameters.acrName }}'"
-                  echo "   → Exécutez d'abord la pipeline CI/CD ou corrigez le tag imageTag"
+                  echo "   → Publiez d'abord l'image dans ACR ou corrigez le tag imageTag"
                   exit 1
                 fi
 
@@ -123,7 +123,7 @@ stages:
               scriptType: 'bash'
               scriptLocation: 'inlineScript'
               inlineScript: |
-                if az containerapp show --name "${{ parameters.functionAppName }}" --resource-group "${{ parameters.sharedResourceGroupName }}" &>/dev/null; then
+                if az functionapp show --name "${{ parameters.functionAppName }}" --resource-group "${{ parameters.sharedResourceGroupName }}" &>/dev/null; then
                   echo "⚠️  Function App '${{ parameters.functionAppName }}' existe déjà -> mise à jour de l'image et de la configuration"
                 else
                   echo "✅ Function App n'existe pas encore (création)"
