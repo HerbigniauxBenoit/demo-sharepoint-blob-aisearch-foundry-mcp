@@ -71,22 +71,31 @@ steps:
           --resource-group "${{ parameters.sharedResourceGroupName }}" \
           --query principalId -o tsv)
 
-        CONTAINER_ENVIRONMENT_ID=$(az containerapp env show \
+        az containerapp env show \
           --name "${{ parameters.containerAppsEnvName }}" \
           --resource-group "${{ parameters.sharedResourceGroupName }}" \
-          --query id -o tsv)
+          --only-show-errors >/dev/null
 
-        STORAGE_ACCOUNT_ID=$(az storage account show \
+        az storage account show \
           --name "${{ parameters.storageAccountName }}" \
           --resource-group "${{ parameters.sharedResourceGroupName }}" \
-          --query id -o tsv)
+          --only-show-errors >/dev/null
 
         APP_INSIGHTS_CONNECTION_STRING=$(az monitor app-insights component show \
           --app "${{ parameters.appInsightsName }}" \
           --resource-group "${{ parameters.sharedResourceGroupName }}" \
           --query connectionString -o tsv)
 
-        ACR_ID=$(az acr show --name "${{ parameters.acrName }}" --query id -o tsv)
+        ACR_ID=$(az acr show \
+          --name "${{ parameters.acrName }}" \
+          --resource-group "${{ parameters.sharedResourceGroupName }}" \
+          --query id -o tsv)
+
+        ACR_LOGIN_SERVER=$(az acr show \
+          --name "${{ parameters.acrName }}" \
+          --resource-group "${{ parameters.sharedResourceGroupName }}" \
+          --query loginServer -o tsv)
+
         az role assignment create \
           --assignee-object-id "$MSI_PRINCIPAL_ID" \
           --assignee-principal-type ServicePrincipal \
@@ -94,59 +103,46 @@ steps:
           --scope "$ACR_ID" \
           --only-show-errors || echo "Info: AcrPull role already assigned"
 
-        IMAGE_NAME="${{ parameters.acrName }}.azurecr.io/${{ parameters.imageName }}:${{ parameters.imageTag }}"
+        IMAGE_NAME="$ACR_LOGIN_SERVER/${{ parameters.imageName }}:${{ parameters.imageTag }}"
+
+        az acr repository show \
+          --name "${{ parameters.acrName }}" \
+          --image "${{ parameters.imageName }}:${{ parameters.imageTag }}" \
+          --only-show-errors >/dev/null
 
         if az functionapp show --name "${{ parameters.functionAppName }}" --resource-group "${{ parameters.sharedResourceGroupName }}" &>/dev/null; then
-          echo "Function App existe, mise à jour de l'image..."
-
-          az functionapp identity assign \
-            --name "${{ parameters.functionAppName }}" \
-            --resource-group "${{ parameters.sharedResourceGroupName }}" \
-            --identities "$MSI_ID"
-
-          az resource update \
-            --resource-group "${{ parameters.sharedResourceGroupName }}" \
-            --resource-type "Microsoft.Web/sites" \
-            --name "${{ parameters.functionAppName }}" \
-            --set properties.siteConfig.acrUseManagedIdentityCreds=true properties.siteConfig.acrUserManagedIdentityID="$MSI_CLIENT_ID" \
-            --only-show-errors >/dev/null
-
-          az functionapp config container set \
-            --name "${{ parameters.functionAppName }}" \
-            --resource-group "${{ parameters.sharedResourceGroupName }}" \
-            --image "$IMAGE_NAME" \
-            --registry-server "https://${{ parameters.acrName }}.azurecr.io"
+          echo "Function App existe, mise a jour de l'image..."
         else
           echo "Creating Function App on Container Apps..."
 
           az functionapp create \
             --name "${{ parameters.functionAppName }}" \
             --resource-group "${{ parameters.sharedResourceGroupName }}" \
-            --storage-account "$STORAGE_ACCOUNT_ID" \
-            --environment "$CONTAINER_ENVIRONMENT_ID" \
+            --storage-account "${{ parameters.storageAccountName }}" \
+            --environment "${{ parameters.containerAppsEnvName }}" \
             --functions-version 4 \
             --runtime dotnet-isolated \
             --runtime-version 8 \
             --image "$IMAGE_NAME"
-
-          az functionapp identity assign \
-            --name "${{ parameters.functionAppName }}" \
-            --resource-group "${{ parameters.sharedResourceGroupName }}" \
-            --identities "$MSI_ID"
-
-          az resource update \
-            --resource-group "${{ parameters.sharedResourceGroupName }}" \
-            --resource-type "Microsoft.Web/sites" \
-            --name "${{ parameters.functionAppName }}" \
-            --set properties.siteConfig.acrUseManagedIdentityCreds=true properties.siteConfig.acrUserManagedIdentityID="$MSI_CLIENT_ID" \
-            --only-show-errors >/dev/null
-
-          az functionapp config container set \
-            --name "${{ parameters.functionAppName }}" \
-            --resource-group "${{ parameters.sharedResourceGroupName }}" \
-            --image "$IMAGE_NAME" \
-            --registry-server "https://${{ parameters.acrName }}.azurecr.io"
         fi
+
+        az functionapp identity assign \
+          --name "${{ parameters.functionAppName }}" \
+          --resource-group "${{ parameters.sharedResourceGroupName }}" \
+          --identities "$MSI_ID"
+
+        az resource update \
+          --resource-group "${{ parameters.sharedResourceGroupName }}" \
+          --resource-type "Microsoft.Web/sites" \
+          --name "${{ parameters.functionAppName }}" \
+          --set properties.siteConfig.acrUseManagedIdentityCreds=true properties.siteConfig.acrUserManagedIdentityID="$MSI_CLIENT_ID" \
+          --only-show-errors >/dev/null
+
+        az functionapp config container set \
+          --name "${{ parameters.functionAppName }}" \
+          --resource-group "${{ parameters.sharedResourceGroupName }}" \
+          --image "$IMAGE_NAME" \
+          --registry-server "https://$ACR_LOGIN_SERVER"
 
         az functionapp config appsettings set \
           --name "${{ parameters.functionAppName }}" \
