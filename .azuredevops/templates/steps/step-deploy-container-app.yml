@@ -99,6 +99,18 @@ steps:
         if az functionapp show --name "${{ parameters.functionAppName }}" --resource-group "${{ parameters.sharedResourceGroupName }}" &>/dev/null; then
           echo "Function App existe, mise à jour de l'image..."
 
+          az functionapp identity assign \
+            --name "${{ parameters.functionAppName }}" \
+            --resource-group "${{ parameters.sharedResourceGroupName }}" \
+            --identities "$MSI_ID"
+
+          az resource update \
+            --resource-group "${{ parameters.sharedResourceGroupName }}" \
+            --resource-type "Microsoft.Web/sites" \
+            --name "${{ parameters.functionAppName }}" \
+            --set properties.siteConfig.acrUseManagedIdentityCreds=true properties.siteConfig.acrUserManagedIdentityID="$MSI_CLIENT_ID" \
+            --only-show-errors >/dev/null
+
           az functionapp config container set \
             --name "${{ parameters.functionAppName }}" \
             --resource-group "${{ parameters.sharedResourceGroupName }}" \
@@ -116,12 +128,25 @@ steps:
             --runtime dotnet-isolated \
             --runtime-version 8 \
             --image "$IMAGE_NAME"
-        fi
 
-        az functionapp identity assign \
-          --name "${{ parameters.functionAppName }}" \
-          --resource-group "${{ parameters.sharedResourceGroupName }}" \
-          --identities "$MSI_ID"
+          az functionapp identity assign \
+            --name "${{ parameters.functionAppName }}" \
+            --resource-group "${{ parameters.sharedResourceGroupName }}" \
+            --identities "$MSI_ID"
+
+          az resource update \
+            --resource-group "${{ parameters.sharedResourceGroupName }}" \
+            --resource-type "Microsoft.Web/sites" \
+            --name "${{ parameters.functionAppName }}" \
+            --set properties.siteConfig.acrUseManagedIdentityCreds=true properties.siteConfig.acrUserManagedIdentityID="$MSI_CLIENT_ID" \
+            --only-show-errors >/dev/null
+
+          az functionapp config container set \
+            --name "${{ parameters.functionAppName }}" \
+            --resource-group "${{ parameters.sharedResourceGroupName }}" \
+            --image "$IMAGE_NAME" \
+            --registry-server "https://${{ parameters.acrName }}.azurecr.io"
+        fi
 
         az functionapp config appsettings set \
           --name "${{ parameters.functionAppName }}" \
