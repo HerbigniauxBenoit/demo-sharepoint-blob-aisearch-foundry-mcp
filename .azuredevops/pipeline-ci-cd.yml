@@ -1,10 +1,3 @@
-# =============================================================================
-# Pipeline : CI/CD - Build & Push Docker Image
-# =============================================================================
-# Déclencheur : Push sur main ou création d'un tag
-# Objectif    : Build l'image Docker et la push vers l'ACR
-# =============================================================================
-
 trigger:
   branches:
     include:
@@ -18,90 +11,101 @@ pr:
     include:
       - main
 
-# -----------------------------------------------------------------------------
+# ----------------------------------------------------
 # Paramètres
-# -----------------------------------------------------------------------------
+# ----------------------------------------------------
 parameters:
-  - name: imageTag
-    displayName: 'Tag de l''image (laisser vide pour auto)'
+  - name: environment
+    displayName: '🌍 Environnement'
     type: string
-    default: ''
+    default: dev
+    values:
+      - dev
+      - nprd
+      - prod
 
-# -----------------------------------------------------------------------------
+  - name: imageTag
+    displayName: "Tag de l'image (laisser vide pour auto)"
+    type: string
+    default: ' '   # vide => auto
+
+# ----------------------------------------------------
 # Variables
-# -----------------------------------------------------------------------------
+# ----------------------------------------------------
 variables:
-  acrName: 'acrmycompany'  # À adapter
-  imageName: 'sharepoint-sync'
-  dockerfilePath: '$(Build.SourcesDirectory)/sync-dotnet/Dockerfile'
-  dockerBuildContext: '$(Build.SourcesDirectory)/sync-dotnet'
-  azureSubscription: 'azure-service-connection'  # À adapter
+  dockerfilePath: '$(Build.SourcesDirectory)/src/tools/sync-dotnet/Dockerfile'
+  dockerBuildContext: '$(Build.SourcesDirectory)/src/tools/sync-dotnet'
+  azureSubscription: 'SVC_GPTrusted_${{ upper(parameters.environment) }}'
 
-# =============================================================================
-# STAGES
-# =============================================================================
+# ====================================================
+# STAGE
+# ====================================================
 stages:
-  - stage: Build
-    displayName: '🔨 Build & Push Image'
-    jobs:
-      - job: BuildAndPush
-        displayName: 'Build Docker Image'
-        pool:
-          vmImage: 'ubuntu-latest'
-        
-        variables:
-          ${{ if ne(parameters.imageTag, '') }}:
-            finalTag: ${{ parameters.imageTag }}
-          ${{ elseif startsWith(variables['Build.SourceBranch'], 'refs/tags/') }}:
-            finalTag: ${{ replace(variables['Build.SourceBranch'], 'refs/tags/', '') }}
-          ${{ else }}:
-            finalTag: $(Build.SourceVersion)
+- stage: Build
+  displayName: '🔨 Build & Push sharepoint-sync'
+  pool: gptrusted-${{ parameters.environment }}
+  
+  jobs:
+  - job: BuildAndPush
+    displayName: 'Build & Push'
+    pool:
+      vmImage: ubuntu-latest
 
-        steps:
-          - checkout: self
-            displayName: '📥 Checkout code'
+    steps:
+    - checkout: self
+      displayName: '📥 Checkout'
 
-          - task: AzureCLI@2
-            displayName: '🔐 Login to ACR'
-            inputs:
-              azureSubscription: $(azureSubscription)
-              scriptType: 'bash'
-              scriptLocation: 'inlineScript'
-              inlineScript: |
-                az acr login --name $(acrName)
+    # 1️⃣ Calcul du tag final : param > tag Git > SHA
+    - bash: |
+        TAG="${IMAGE_TAG_PARAM}"
 
-          - task: AzureCLI@2
-            displayName: '🐳 Build Docker image'
-            inputs:
-              azureSubscription: $(azureSubscription)
-              scriptType: 'bash'
-              scriptLocation: 'inlineScript'
-              inlineScript: |
-                echo "Building image with tag: $(finalTag)"
-                
-                docker build \
-                  -t $(acrName).azurecr.io/$(imageName):$(finalTag) \
-                  -t $(acrName).azurecr.io/$(imageName):latest \
-                  -f $(dockerfilePath) \
-                  $(dockerBuildContext)
+        if [ -z "$TAG" ]; then
+          echo "Paramètre imageTag vide, on regarde la source : $BUILD_SOURCEBRANCH"
+          if [[ "$BUILD_SOURCEBRANCH" == refs/tags/* ]]; then
+            TAG="${BUILD_SOURCEBRANCH#refs/tags/}"
+            echo "Build depuis un tag Git -> TAG = $TAG"
+          else
+            TAG="$BUILD_SOURCEVERSION"
+            echo "Build depuis une branche -> TAG = $TAG"
+          fi
+        else
+          echo "Tag fourni en paramètre -> TAG = $TAG"
+        fi
 
-          - task: AzureCLI@2
-            displayName: '📤 Push to ACR'
-            inputs:
-              azureSubscription: $(azureSubscription)
-              scriptType: 'bash'
-              scriptLocation: 'inlineScript'
-              inlineScript: |
-                echo "Pushing image to ACR..."
-                
-                docker push $(acrName).azurecr.io/$(imageName):$(finalTag)
-                docker push $(acrName).azurecr.io/$(imageName):latest
-                
-                echo "✅ Image pushed successfully!"
-                echo "   - $(acrName).azurecr.io/$(imageName):$(finalTag)"
-                echo "   - $(acrName).azurecr.io/$(imageName):latest"
+        echo "Tag final = $TAG"
+        echo "##vso[task.setvariable variable=FINAL_TAG]$TAG"
+      displayName: '🧮 Calcul du tag final'
+      env:
+        IMAGE_TAG_PARAM: ${{ parameters.imageTag }}
 
-          - bash: |
-              echo "##vso[task.setvariable variable=imageTag;isOutput=true]$(finalTag)"
-            name: outputVars
-            displayName: '📋 Output image tag'
+    # 2️⃣ Build Docker (même logique que ton job webchat-jobs)
+    - task: Docker@2
+      displayName: 'Docker build sharepoint-sync'
+      inputs:
+        repository: acrgptrusted${{ parameters.environment }}.azurecr.io/guardian/sharepoint-sync
+        command: build
+        Dockerfile: $(dockerfilePath)
+        buildContext: $(dockerBuildContext)
+        tags: $(FINAL_TAG)
+
+    # 3️⃣ Push Docker (pattern IDENTIQUE à ton exemple)
+    - task: AzureCLI@2
+      displayName: Docker push sharepoint-sync
+      inputs:
+        azureSubscription: $(azureSubscription)
+        scriptType: bash
+        scriptLocation: inlineScript
+        failOnStandardError: true
+        inlineScript: |
+          IMAGE_FULL_NAME=${REGISTRY_NAME}.azurecr.io/${REPOSITORY_NAME}/${IMAGE_NAME}:${IMAGE_TAG}
+
+          echo "Login à l'ACR : ${REGISTRY_NAME}"
+          az acr login --name ${REGISTRY_NAME} --only-show-errors
+
+          echo "docker push ${IMAGE_FULL_NAME}"
+          docker push ${IMAGE_FULL_NAME}
+      env:
+        REGISTRY_NAME: acrgptrusted${{ parameters.environment }}
+        REPOSITORY_NAME: guardian            # change si besoin
+        IMAGE_NAME: sharepoint-sync          # ton image
+        IMAGE_TAG: $(FINAL_TAG)
