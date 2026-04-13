@@ -55,7 +55,7 @@ stages:
     - checkout: self
       displayName: '📥 Checkout'
 
-    # 1️⃣ Calcul du tag final : param > tag Git > SHA
+    # 1️⃣ Calcul du tag final
     - bash: |
         TAG="${IMAGE_TAG_PARAM}"
 
@@ -78,17 +78,19 @@ stages:
       env:
         IMAGE_TAG_PARAM: ${{ parameters.imageTag }}
 
-    # 2️⃣ Build Docker (même logique que ton job webchat-jobs)
+    # 2️⃣ Build Docker
     - task: Docker@2
       displayName: 'Docker build sharepoint-sync'
       inputs:
-        repository: acrgptrusted${{ parameters.environment }}.azurecr.io/guardian/sharepoint-sync
+        repository: acrcompanion${{ parameters.environment }}.azurecr.io/sharepoint-sync
         command: build
         Dockerfile: $(dockerfilePath)
         buildContext: $(dockerBuildContext)
-        tags: $(FINAL_TAG)
+        tags: |
+          $(FINAL_TAG)
+          latest
 
-    # 3️⃣ Push Docker (pattern IDENTIQUE à ton exemple)
+    # 3️⃣ Push Docker
     - task: AzureCLI@2
       displayName: Docker push sharepoint-sync
       inputs:
@@ -97,15 +99,17 @@ stages:
         scriptLocation: inlineScript
         failOnStandardError: true
         inlineScript: |
-          IMAGE_FULL_NAME=${REGISTRY_NAME}.azurecr.io/${REPOSITORY_NAME}/${IMAGE_NAME}:${IMAGE_TAG}
+          IMAGE_FULL_NAME=${REGISTRY_NAME}.azurecr.io/${IMAGE_NAME}
 
           echo "Login à l'ACR : ${REGISTRY_NAME}"
           az acr login --name ${REGISTRY_NAME} --only-show-errors
 
-          echo "docker push ${IMAGE_FULL_NAME}"
-          docker push ${IMAGE_FULL_NAME}
+          echo "docker push ${IMAGE_FULL_NAME}:${IMAGE_FULL_NAME}"
+          docker push ${IMAGE_FULL_NAME}:${IMAGE_FULL_NAME}
+
+          echo "docker push ${IMAGE_FULL_NAME}:latest"
+          docker push ${IMAGE_FULL_NAME}:latest
       env:
-        REGISTRY_NAME: acrgptrusted${{ parameters.environment }}
-        REPOSITORY_NAME: guardian            # change si besoin
-        IMAGE_NAME: sharepoint-sync          # ton image
+        REGISTRY_NAME: acrcompanion${{ parameters.environment }}
+        IMAGE_NAME: sharepoint-sync
         IMAGE_TAG: $(FINAL_TAG)

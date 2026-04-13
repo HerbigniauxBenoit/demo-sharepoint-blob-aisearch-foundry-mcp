@@ -94,7 +94,7 @@ variables:
   imageName: 'sharepoint-sync'
   
   # Service Connection
-  azureSubscription: 'SVC-GPTrusted_${{ upper(parameters.environment) }}'
+  azureSubscription: 'SVC_GPTrusted_${{ upper(parameters.environment) }}'
 
 # =============================================================================
 # STAGES

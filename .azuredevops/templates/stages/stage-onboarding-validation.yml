@@ -45,6 +45,7 @@ parameters:
 
 stages:
   - stage: Validation
+    pool: gptrusted-${{ parameters.environment }}
     displayName: '✅ 1. Validation'
     jobs:
       - job: ValidateParameters
