@@ -49,6 +49,8 @@ steps:
       scriptType: 'bash'
       scriptLocation: 'inlineScript'
       inlineScript: |
+        set -euo pipefail
+
         echo "================================================"
         echo " DEPLOY FUNCTION APP ON CONTAINER APPS          "
         echo "================================================"
@@ -94,7 +96,7 @@ steps:
 
         IMAGE_NAME="${{ parameters.acrName }}.azurecr.io/${{ parameters.imageName }}:${{ parameters.imageTag }}"
 
-        if az containerapp show --name "${{ parameters.functionAppName }}" --resource-group "${{ parameters.sharedResourceGroupName }}" &>/dev/null; then
+        if az functionapp show --name "${{ parameters.functionAppName }}" --resource-group "${{ parameters.sharedResourceGroupName }}" &>/dev/null; then
           echo "Function App existe, mise à jour de l'image..."
 
           az functionapp config container set \
