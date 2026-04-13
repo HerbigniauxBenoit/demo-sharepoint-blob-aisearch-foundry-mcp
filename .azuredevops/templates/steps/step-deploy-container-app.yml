@@ -112,9 +112,26 @@ steps:
 
         if az functionapp show --name "${{ parameters.functionAppName }}" --resource-group "${{ parameters.sharedResourceGroupName }}" &>/dev/null; then
           echo "Function App existe, mise a jour de l'image..."
+
+          # Ensure MSI is assigned before configuring registry
+          az functionapp identity assign \
+            --name "${{ parameters.functionAppName }}" \
+            --resource-group "${{ parameters.sharedResourceGroupName }}" \
+            --identities "$MSI_ID" \
+            --only-show-errors >/dev/null
+
+          # For Container Apps hosting, --registry-identity is the correct way to auth with ACR via MSI
+          # (az resource update on Microsoft.Web/sites acrUseManagedIdentityCreds does NOT apply to Container Apps hosting)
+          az functionapp config container set \
+            --name "${{ parameters.functionAppName }}" \
+            --resource-group "${{ parameters.sharedResourceGroupName }}" \
+            --image "$IMAGE_NAME" \
+            --registry-server "https://$ACR_LOGIN_SERVER" \
+            --registry-identity "$MSI_ID"
         else
           echo "Creating Function App on Container Apps..."
 
+          # Bootstrap with public image so ARM provisioning succeeds before MSI/ACR wiring
           az functionapp create \
             --name "${{ parameters.functionAppName }}" \
             --resource-group "${{ parameters.sharedResourceGroupName }}" \
@@ -123,26 +140,23 @@ steps:
             --functions-version 4 \
             --runtime dotnet-isolated \
             --runtime-version 8 \
-            --image "$IMAGE_NAME"
+            --image "mcr.microsoft.com/azure-functions/dotnet-isolated:4-dotnet-isolated8.0"
+
+          # Assign MSI after creation
+          az functionapp identity assign \
+            --name "${{ parameters.functionAppName }}" \
+            --resource-group "${{ parameters.sharedResourceGroupName }}" \
+            --identities "$MSI_ID" \
+            --only-show-errors >/dev/null
+
+          # Now wire ACR pull via MSI — --registry-identity is the Container Apps-native way
+          az functionapp config container set \
+            --name "${{ parameters.functionAppName }}" \
+            --resource-group "${{ parameters.sharedResourceGroupName }}" \
+            --image "$IMAGE_NAME" \
+            --registry-server "https://$ACR_LOGIN_SERVER" \
+            --registry-identity "$MSI_ID"
         fi
-
-        az functionapp identity assign \
-          --name "${{ parameters.functionAppName }}" \
-          --resource-group "${{ parameters.sharedResourceGroupName }}" \
-          --identities "$MSI_ID"
-
-        az resource update \
-          --resource-group "${{ parameters.sharedResourceGroupName }}" \
-          --resource-type "Microsoft.Web/sites" \
-          --name "${{ parameters.functionAppName }}" \
-          --set properties.siteConfig.acrUseManagedIdentityCreds=true properties.siteConfig.acrUserManagedIdentityID="$MSI_CLIENT_ID" \
-          --only-show-errors >/dev/null
-
-        az functionapp config container set \
-          --name "${{ parameters.functionAppName }}" \
-          --resource-group "${{ parameters.sharedResourceGroupName }}" \
-          --image "$IMAGE_NAME" \
-          --registry-server "https://$ACR_LOGIN_SERVER"
 
         az functionapp config appsettings set \
           --name "${{ parameters.functionAppName }}" \
