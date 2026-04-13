@@ -16,6 +16,8 @@ parameters:
     type: string
   - name: containerAppsEnvName
     type: string
+  - name: appInsightsName
+    type: string
   - name: functionAppName
     type: string
   - name: managedIdentityName
@@ -84,6 +86,29 @@ stages:
               echo ""
             displayName: '📋 Afficher les paramètres'
 
+          - bash: |
+              set -euo pipefail
+
+              if [[ ! "${{ parameters.environment }}" =~ ^(dev|nprd|prod)$ ]]; then
+                echo "❌ ERREUR: environnement invalide '${{ parameters.environment }}'"
+                exit 1
+              fi
+
+              if [[ ! "${{ parameters.companionName }}" =~ ^[a-z0-9]([a-z0-9-]*[a-z0-9])?$ ]]; then
+                echo "❌ ERREUR: companionName doit être en minuscules, chiffres et tirets, sans tiret au début ou à la fin"
+                exit 1
+              fi
+
+              FUNCTION_APP_NAME="${{ parameters.functionAppName }}"
+              if [ ${#FUNCTION_APP_NAME} -gt 32 ]; then
+                echo "❌ ERREUR: le nom de Function App '$FUNCTION_APP_NAME' dépasse 32 caractères"
+                echo "   → Réduisez companionName pour respecter la limite Azure Container Apps"
+                exit 1
+              fi
+
+              echo "✅ Validation des conventions de nommage réussie"
+            displayName: '🧪 Valider les conventions de nommage'
+
           - template: ../steps/step-verify-shared-resources.yml
             parameters:
               azureSubscription: ${{ parameters.azureSubscription }}
@@ -91,6 +116,7 @@ stages:
               storageAccountName: ${{ parameters.storageAccountName }}
               aiSearchName: ${{ parameters.aiSearchName }}
               containerAppsEnvName: ${{ parameters.containerAppsEnvName }}
+              appInsightsName: ${{ parameters.appInsightsName }}
 
           - task: AzureCLI@2
             displayName: '🐳 Vérifier l''image ACR'
@@ -124,7 +150,7 @@ stages:
               scriptLocation: 'inlineScript'
               inlineScript: |
                 if az functionapp show --name "${{ parameters.functionAppName }}" --resource-group "${{ parameters.sharedResourceGroupName }}" &>/dev/null; then
-                  echo "⚠️  Function App '${{ parameters.functionAppName }}' existe déjà -> mise à jour de l'image et de la configuration"
+                  echo "ℹ️  Function App '${{ parameters.functionAppName }}' existe déjà -> le déploiement sera ignoré"
                 else
                   echo "✅ Function App n'existe pas encore (création)"
                 fi

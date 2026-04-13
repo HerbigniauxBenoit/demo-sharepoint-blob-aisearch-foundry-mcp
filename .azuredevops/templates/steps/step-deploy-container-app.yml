@@ -36,10 +36,6 @@ parameters:
     type: string
   - name: syncPermissions
     type: string
-  - name: environment
-    type: string
-  - name: companionName
-    type: string
 
 steps:
   - task: AzureCLI@2
@@ -55,6 +51,17 @@ steps:
         echo " DEPLOY FUNCTION APP ON CONTAINER APPS          "
         echo "================================================"
         echo ""
+
+        # Create-only behavior: if app already exists, stop here with no side effects.
+        if az functionapp show --name "${{ parameters.functionAppName }}" --resource-group "${{ parameters.sharedResourceGroupName }}" &>/dev/null; then
+          echo "Function App existe deja, aucun changement applique."
+          az functionapp show \
+            --name "${{ parameters.functionAppName }}" \
+            --resource-group "${{ parameters.sharedResourceGroupName }}" \
+            --query "{name:name, state:state, host:defaultHostName, kind:kind}" \
+            -o table
+          exit 0
+        fi
 
         MSI_ID=$(az identity show \
           --name "${{ parameters.managedIdentityName }}" \
@@ -96,12 +103,22 @@ steps:
           --resource-group "${{ parameters.sharedResourceGroupName }}" \
           --query loginServer -o tsv)
 
-        az role assignment create \
-          --assignee-object-id "$MSI_PRINCIPAL_ID" \
-          --assignee-principal-type ServicePrincipal \
-          --role "AcrPull" \
+        EXISTING_ACRPULL_COUNT=$(az role assignment list \
+          --assignee "$MSI_PRINCIPAL_ID" \
           --scope "$ACR_ID" \
-          --only-show-errors || echo "Info: AcrPull role already assigned"
+          --query "[?roleDefinitionName=='AcrPull'] | length(@)" \
+          -o tsv)
+
+        if [ "$EXISTING_ACRPULL_COUNT" != "0" ]; then
+          echo "Info: AcrPull role already assigned"
+        else
+          az role assignment create \
+            --assignee-object-id "$MSI_PRINCIPAL_ID" \
+            --assignee-principal-type ServicePrincipal \
+            --role "AcrPull" \
+            --scope "$ACR_ID" \
+            --only-show-errors
+        fi
 
         IMAGE_NAME="$ACR_LOGIN_SERVER/${{ parameters.imageName }}:${{ parameters.imageTag }}"
 
@@ -110,54 +127,29 @@ steps:
           --image "${{ parameters.imageName }}:${{ parameters.imageTag }}" \
           --only-show-errors >/dev/null
 
-        if az functionapp show --name "${{ parameters.functionAppName }}" --resource-group "${{ parameters.sharedResourceGroupName }}" &>/dev/null; then
-          echo "Function App existe, mise a jour de l'image..."
+        echo "Creating Function App on Container Apps from shared ACR image..."
 
-          # Ensure MSI is assigned before configuring registry
-          az functionapp identity assign \
-            --name "${{ parameters.functionAppName }}" \
-            --resource-group "${{ parameters.sharedResourceGroupName }}" \
-            --identities "$MSI_ID" \
-            --only-show-errors >/dev/null
+        az functionapp create \
+          --name "${{ parameters.functionAppName }}" \
+          --resource-group "${{ parameters.sharedResourceGroupName }}" \
+          --storage-account "${{ parameters.storageAccountName }}" \
+          --environment "${{ parameters.containerAppsEnvName }}" \
+          --functions-version 4 \
+          --runtime dotnet-isolated \
+          --runtime-version 8 \
+          --assign-identity "$MSI_ID" \
+          --min-replicas 1 \
+          --max-replicas 1 \
+          --registry-server "$ACR_LOGIN_SERVER" \
+          --image "$IMAGE_NAME"
 
-          # For Container Apps hosting, --registry-identity is the correct way to auth with ACR via MSI
-          # (az resource update on Microsoft.Web/sites acrUseManagedIdentityCreds does NOT apply to Container Apps hosting)
-          az functionapp config container set \
-            --name "${{ parameters.functionAppName }}" \
-            --resource-group "${{ parameters.sharedResourceGroupName }}" \
-            --image "$IMAGE_NAME" \
-            --registry-server "https://$ACR_LOGIN_SERVER" \
-            --registry-identity "$MSI_ID"
-        else
-          echo "Creating Function App on Container Apps..."
-
-          # Bootstrap with public image so ARM provisioning succeeds before MSI/ACR wiring
-          az functionapp create \
-            --name "${{ parameters.functionAppName }}" \
-            --resource-group "${{ parameters.sharedResourceGroupName }}" \
-            --storage-account "${{ parameters.storageAccountName }}" \
-            --environment "${{ parameters.containerAppsEnvName }}" \
-            --functions-version 4 \
-            --runtime dotnet-isolated \
-            --runtime-version 8 \
-            --image "mcr.microsoft.com/azure-functions/dotnet-isolated:4-dotnet-isolated8.0"
-
-          # Assign MSI after creation
-          az functionapp identity assign \
-            --name "${{ parameters.functionAppName }}" \
-            --resource-group "${{ parameters.sharedResourceGroupName }}" \
-            --identities "$MSI_ID" \
-            --only-show-errors >/dev/null
-
-          # Now wire ACR pull via MSI — --registry-identity is the Container Apps-native way
-          az functionapp config container set \
-            --name "${{ parameters.functionAppName }}" \
-            --resource-group "${{ parameters.sharedResourceGroupName }}" \
-            --image "$IMAGE_NAME" \
-            --registry-server "https://$ACR_LOGIN_SERVER" \
-            --registry-identity "$MSI_ID"
-        fi
-
+        # Ensure ACR pull is explicitly configured through the user-assigned identity.
+        az functionapp config container set \
+          --name "${{ parameters.functionAppName }}" \
+          --resource-group "${{ parameters.sharedResourceGroupName }}" \
+          --image "$IMAGE_NAME" \
+          --registry-server "$ACR_LOGIN_SERVER" \
+          --registry-identity "$MSI_ID"
         az functionapp config appsettings set \
           --name "${{ parameters.functionAppName }}" \
           --resource-group "${{ parameters.sharedResourceGroupName }}" \
@@ -174,9 +166,27 @@ steps:
             "SYNC_SCHEDULE=${{ parameters.syncSchedule }}" \
             "AZURE_CLIENT_ID=$MSI_CLIENT_ID" \
             "APPLICATIONINSIGHTS_CONNECTION_STRING=$APP_INSIGHTS_CONNECTION_STRING" \
+            "WEBSITES_INCLUDE_CLOUD_CERTS=true" \
             "AzureWebJobsStorage__accountName=${{ parameters.storageAccountName }}" \
             "AzureWebJobsStorage__credential=managedidentity" \
             "AzureWebJobsStorage__clientId=$MSI_CLIENT_ID"
+
+        az functionapp scale config set \
+          --name "${{ parameters.functionAppName }}" \
+          --resource-group "${{ parameters.sharedResourceGroupName }}" \
+          --maximum-instance-count 1 \
+          --only-show-errors || echo "Info: scale configuration update skipped"
+
+        az functionapp restart \
+          --name "${{ parameters.functionAppName }}" \
+          --resource-group "${{ parameters.sharedResourceGroupName }}" \
+          --only-show-errors
+
+        az functionapp show \
+          --name "${{ parameters.functionAppName }}" \
+          --resource-group "${{ parameters.sharedResourceGroupName }}" \
+          --query "{name:name, state:state, host:defaultHostName, kind:kind}" \
+          -o table
 
         echo ""
         echo "Function App deployed: ${{ parameters.functionAppName }}"

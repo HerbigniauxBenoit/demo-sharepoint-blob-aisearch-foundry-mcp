@@ -18,23 +18,12 @@ parameters:
     default: 'dev'
     values:
       - dev
-      - staging
+      - nprd
       - prod
 
   - name: companionName
     displayName: '🤖 Nom du compagnon (ex: hr-assistant)'
     type: string
-
-  - name: location
-    displayName: '📍 Région Azure du RG compagnon'
-    type: string
-    default: 'francecentral'
-    values:
-      - francecentral
-      - westeurope
-      - northeurope
-      - eastus
-      - westus2
 
   - name: sharepointSiteUrl
     displayName: '🔗 URL du site SharePoint'
@@ -110,6 +99,7 @@ stages:
       storageAccountName: $(storageAccountName)
       aiSearchName: $(aiSearchName)
       containerAppsEnvName: $(containerAppsEnvName)
+      appInsightsName: $(appInsightsName)
       functionAppName: $(functionAppName)
       managedIdentityName: $(managedIdentityName)
       blobContainerName: $(blobContainerName)
@@ -158,6 +148,7 @@ stages:
       containerName: $(blobContainerName)
       companionName: ${{ parameters.companionName }}
       dependsOn:
+        - Validation
         - CreateBlobContainer
 
   # Stage 5 : Assigner RBAC
@@ -169,6 +160,7 @@ stages:
       storageAccountName: $(storageAccountName)
       aiSearchName: $(aiSearchName)
       dependsOn:
+        - Validation
         - CreateManagedIdentity
         - CreateBlobContainer
 
@@ -192,9 +184,8 @@ stages:
       syncSchedule: ${{ parameters.syncSchedule }}
       deleteOrphanedBlobs: ${{ parameters.deleteOrphanedBlobs }}
       syncPermissions: ${{ parameters.syncPermissions }}
-      environment: ${{ parameters.environment }}
-      companionName: ${{ parameters.companionName }}
       dependsOn:
+        - Validation
         - AssignRBAC
         - ConfigureAISearch
 

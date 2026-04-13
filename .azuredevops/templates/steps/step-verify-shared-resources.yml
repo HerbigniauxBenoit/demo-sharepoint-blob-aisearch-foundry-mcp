@@ -12,6 +12,8 @@ parameters:
     type: string
   - name: containerAppsEnvName
     type: string
+  - name: appInsightsName
+    type: string
 
 steps:
   - task: AzureCLI@2
@@ -49,6 +51,13 @@ steps:
           exit 1
         fi
         echo "✅ Container Apps Environment existe"
+
+        echo "Vérification d'Application Insights..."
+        if ! az monitor app-insights component show --app "${{ parameters.appInsightsName }}" --resource-group "${{ parameters.sharedResourceGroupName }}" &>/dev/null; then
+          echo "❌ ERREUR: Application Insights '${{ parameters.appInsightsName }}' n'existe pas"
+          exit 1
+        fi
+        echo "✅ Application Insights existe"
         
         echo ""
         echo "✅ Toutes les ressources partagées sont présentes"

@@ -36,10 +36,6 @@ parameters:
     type: string
   - name: syncPermissions
     type: string
-  - name: environment
-    type: string
-  - name: companionName
-    type: string
   - name: dependsOn
     type: object
     default: []
@@ -73,5 +69,3 @@ stages:
               syncSchedule: ${{ parameters.syncSchedule }}
               deleteOrphanedBlobs: ${{ parameters.deleteOrphanedBlobs }}
               syncPermissions: ${{ parameters.syncPermissions }}
-              environment: ${{ parameters.environment }}
-              companionName: ${{ parameters.companionName }}

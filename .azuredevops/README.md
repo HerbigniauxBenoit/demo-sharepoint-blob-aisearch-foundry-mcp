@@ -4,15 +4,13 @@
 
 - `pipeline-ci-cd.yml`: build and push Docker image for `sync-dotnet/Dockerfile`
 - `pipeline-infra-shared.yml`: create the shared platform resources once per environment
-- `pipeline-onboarding-companion.yml`: deploy one companion independently in the companion resource group
+- `pipeline-onboarding-companion.yml`: deploy one companion independently in the shared environment resource group
 
 ## Resource group model
 
-- shared resources are deployed in one RG per environment: `companion-shared-<env>`
-- companion-dedicated Azure resources are deployed in one RG: `rg-companion`
-- the onboarding pipeline creates `rg-companion` automatically if it does not exist
-- storage account, AI Search, Container Apps environment, Log Analytics, and Application Insights stay in the shared RG
-- managed identity and Function App are created in the companion RG
+- all Azure resources are deployed in one shared RG per environment: `rg-companion-<env>`
+- storage account, AI Search, Container Apps environment, Log Analytics, App Insights, ACR, managed identities, and Function Apps live in this shared RG
+- the onboarding pipeline creates companion-specific resources inside the existing shared RG created by `pipeline-infra-shared.yml`
 
 ## Companion deployment target
 
