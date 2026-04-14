@@ -52,6 +52,7 @@ steps:
         echo "================================================"
         echo ""
 
+        # Create-only behavior: if app already exists, stop here with no side effects.
         if az functionapp show --name "${{ parameters.functionAppName }}" --resource-group "${{ parameters.sharedResourceGroupName }}" &>/dev/null; then
           echo "Function App existe deja, aucun changement applique."
           az functionapp show \
@@ -128,6 +129,8 @@ steps:
 
         echo "Creating Function App on Container Apps from shared ACR image..."
 
+        # FIX: --registry-identity n'est pas supporté dans az functionapp create.
+        # L'auth ACR via managed identity est configurée dans config container set ci-dessous.
         az functionapp create \
           --name "${{ parameters.functionAppName }}" \
           --resource-group "${{ parameters.sharedResourceGroupName }}" \
@@ -142,6 +145,7 @@ steps:
           --registry-server "$ACR_LOGIN_SERVER" \
           --image "$IMAGE_NAME"
 
+        # Lie la user-assigned managed identity à l'ACR pour le pull d'image.
         az functionapp config container set \
           --name "${{ parameters.functionAppName }}" \
           --resource-group "${{ parameters.sharedResourceGroupName }}" \
