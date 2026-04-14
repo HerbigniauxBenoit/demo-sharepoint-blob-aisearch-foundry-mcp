@@ -52,7 +52,6 @@ steps:
         echo "================================================"
         echo ""
 
-        # Create-only behavior: if app already exists, stop here with no side effects.
         if az functionapp show --name "${{ parameters.functionAppName }}" --resource-group "${{ parameters.sharedResourceGroupName }}" &>/dev/null; then
           echo "Function App existe deja, aucun changement applique."
           az functionapp show \
@@ -143,13 +142,13 @@ steps:
           --registry-server "$ACR_LOGIN_SERVER" \
           --image "$IMAGE_NAME"
 
-        # Ensure ACR pull is explicitly configured through the user-assigned identity.
         az functionapp config container set \
           --name "${{ parameters.functionAppName }}" \
           --resource-group "${{ parameters.sharedResourceGroupName }}" \
           --image "$IMAGE_NAME" \
           --registry-server "$ACR_LOGIN_SERVER" \
           --registry-identity "$MSI_ID"
+
         az functionapp config appsettings set \
           --name "${{ parameters.functionAppName }}" \
           --resource-group "${{ parameters.sharedResourceGroupName }}" \
