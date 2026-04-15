@@ -18,7 +18,7 @@ parameters:
     type: string
   - name: appInsightsName
     type: string
-  - name: functionAppName
+  - name: containerAppName
     type: string
   - name: managedIdentityName
     type: string
@@ -80,7 +80,7 @@ stages:
               echo "=== Ressources à créer ==="
               echo "RG partagé       : ${{ parameters.sharedResourceGroupName }}"
               echo "MSI              : ${{ parameters.managedIdentityName }}"
-              echo "Function App     : ${{ parameters.functionAppName }}"
+              echo "Container App    : ${{ parameters.containerAppName }}"
               echo "Blob Container   : ${{ parameters.blobContainerName }}"
               echo "AI Search Index  : ${{ parameters.aiSearchIndexName }}"
               echo ""
@@ -99,9 +99,9 @@ stages:
                 exit 1
               fi
 
-              FUNCTION_APP_NAME="${{ parameters.functionAppName }}"
-              if [ ${#FUNCTION_APP_NAME} -gt 32 ]; then
-                echo "❌ ERREUR: le nom de Function App '$FUNCTION_APP_NAME' dépasse 32 caractères"
+              CONTAINER_APP_NAME="${{ parameters.containerAppName }}"
+              if [ ${#CONTAINER_APP_NAME} -gt 32 ]; then
+                echo "❌ ERREUR: le nom de Container App '$CONTAINER_APP_NAME' dépasse 32 caractères"
                 echo "   → Réduisez companionName pour respecter la limite Azure Container Apps"
                 exit 1
               fi
@@ -143,14 +143,16 @@ stages:
                 echo "✅ Image trouvée: ${{ parameters.acrName }}.azurecr.io/${{ parameters.imageName }}:${{ parameters.imageTag }}"
 
           - task: AzureCLI@2
-            displayName: '🔍 Vérifier si la Function App existe déjà'
+            displayName: '🔍 Vérifier si la Container App existe déjà'
             inputs:
               azureSubscription: ${{ parameters.azureSubscription }}
               scriptType: 'bash'
               scriptLocation: 'inlineScript'
               inlineScript: |
-                if az functionapp show --name "${{ parameters.functionAppName }}" --resource-group "${{ parameters.sharedResourceGroupName }}" &>/dev/null; then
-                  echo "ℹ️  Function App '${{ parameters.functionAppName }}' existe déjà -> le déploiement sera ignoré"
+                if az containerapp show \
+                    --name "${{ parameters.containerAppName }}" \
+                    --resource-group "${{ parameters.sharedResourceGroupName }}" &>/dev/null; then
+                  echo "ℹ️  Container App '${{ parameters.containerAppName }}' existe déjà -> le déploiement sera ignoré"
                 else
-                  echo "✅ Function App n'existe pas encore (création)"
+                  echo "✅ Container App n'existe pas encore (création)"
                 fi

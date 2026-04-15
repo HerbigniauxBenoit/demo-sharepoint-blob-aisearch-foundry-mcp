@@ -104,8 +104,8 @@ stages:
           echo "Login à l'ACR : ${REGISTRY_NAME}"
           az acr login --name ${REGISTRY_NAME} --only-show-errors
 
-          echo "docker push ${IMAGE_FULL_NAME}:${IMAGE_FULL_NAME}"
-          docker push ${IMAGE_FULL_NAME}:${IMAGE_FULL_NAME}
+          echo "docker push ${IMAGE_FULL_NAME}:${FINAL_TAG}"
+          docker push ${IMAGE_FULL_NAME}:${FINAL_TAG}
 
           echo "docker push ${IMAGE_FULL_NAME}:latest"
           docker push ${IMAGE_FULL_NAME}:latest

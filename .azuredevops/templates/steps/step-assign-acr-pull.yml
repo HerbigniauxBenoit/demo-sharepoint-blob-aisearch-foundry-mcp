@@ -1,0 +1,66 @@
+# =============================================================================
+# Step Template : Assign AcrPull role to user-assigned MSI
+# =============================================================================
+parameters:
+  - name: azureSubscription
+    type: string
+  - name: sharedResourceGroupName
+    type: string
+  - name: managedIdentityName
+    type: string
+  - name: acrName
+    type: string
+  - name: waitForPropagation
+    type: boolean
+    default: true
+
+steps:
+  - task: AzureCLI@2
+    displayName: 'Step 2/3 : Assign AcrPull to MSI'
+    inputs:
+      azureSubscription: ${{ parameters.azureSubscription }}
+      scriptType: 'bash'
+      scriptLocation: 'inlineScript'
+      inlineScript: |
+        set -euo pipefail
+
+        # Récupérer le principal ID de la MSI user-assigned
+        MSI_PRINCIPAL_ID=$(az identity show \
+          --name "${{ parameters.managedIdentityName }}" \
+          --resource-group "${{ parameters.sharedResourceGroupName }}" \
+          --query principalId -o tsv \
+          --only-show-errors)
+
+        ACR_ID=$(az acr show \
+          --name "${{ parameters.acrName }}" \
+          --resource-group "${{ parameters.sharedResourceGroupName }}" \
+          --query id -o tsv \
+          --only-show-errors)
+
+        echo "MSI Principal ID : $MSI_PRINCIPAL_ID"
+        echo "ACR ID           : $ACR_ID"
+
+        # Vérifier si le rôle est déjà assigné
+        EXISTING=$(az role assignment list \
+          --assignee "$MSI_PRINCIPAL_ID" \
+          --role "AcrPull" \
+          --scope "$ACR_ID" \
+          --query "[0].id" -o tsv \
+          --only-show-errors 2>/dev/null || true)
+
+        if [ -n "$EXISTING" ]; then
+          echo "✅ Rôle AcrPull déjà assigné, aucune action nécessaire."
+        else
+          echo "Attribution du rôle AcrPull..."
+          az role assignment create \
+            --assignee "$MSI_PRINCIPAL_ID" \
+            --role "AcrPull" \
+            --scope "$ACR_ID" \
+            --only-show-errors
+          echo "✅ Rôle AcrPull assigné."
+        fi
+
+        if [ "${{ parameters.waitForPropagation }}" = "true" ]; then
+          echo "Attente de propagation Entra ID (30s)..."
+          sleep 30
+        fi

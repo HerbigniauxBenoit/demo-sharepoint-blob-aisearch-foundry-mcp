@@ -69,19 +69,19 @@ variables:
   aiSearchName: 'srch-companion-shared-${{ parameters.environment }}'
   containerAppsEnvName: 'cae-companion-shared-${{ parameters.environment }}'
   appInsightsName: 'appi-companion-shared-${{ parameters.environment }}'
-  
-  # Ressources du compagnon (dans le même RG partagé)
+
+  # Ressources du compagnon
   managedIdentityName: 'id-${{ parameters.companionName }}-${{ parameters.environment }}'
-  functionAppName: 'func-${{ parameters.companionName }}-sync-${{ parameters.environment }}'
+  containerAppName: 'ca-${{ parameters.companionName }}-sync-${{ parameters.environment }}'
   blobContainerName: '${{ parameters.companionName }}'
   aiSearchIndexName: 'idx-${{ parameters.companionName }}'
   aiSearchDataSourceName: 'ds-${{ parameters.companionName }}'
   aiSearchIndexerName: 'idxr-${{ parameters.companionName }}'
-  
+
   # ACR
   acrName: 'acrcompanion${{ parameters.environment }}'
   imageName: 'sharepoint-sync'
-  
+
   # Service Connection
   azureSubscription: 'SVC_GPTrusted_${{ upper(parameters.environment) }}'
 
@@ -100,7 +100,7 @@ stages:
       aiSearchName: $(aiSearchName)
       containerAppsEnvName: $(containerAppsEnvName)
       appInsightsName: $(appInsightsName)
-      functionAppName: $(functionAppName)
+      containerAppName: $(containerAppName)
       managedIdentityName: $(managedIdentityName)
       blobContainerName: $(blobContainerName)
       aiSearchIndexName: $(aiSearchIndexName)
@@ -169,7 +169,7 @@ stages:
     parameters:
       azureSubscription: $(azureSubscription)
       sharedResourceGroupName: $(sharedResourceGroupName)
-      functionAppName: $(functionAppName)
+      containerAppName: $(containerAppName)
       containerAppsEnvName: $(containerAppsEnvName)
       managedIdentityName: $(managedIdentityName)
       appInsightsName: $(appInsightsName)
@@ -194,7 +194,7 @@ stages:
     parameters:
       azureSubscription: $(azureSubscription)
       sharedResourceGroupName: $(sharedResourceGroupName)
-      functionAppName: $(functionAppName)
+      containerAppName: $(containerAppName)
       managedIdentityName: $(managedIdentityName)
       blobContainerName: $(blobContainerName)
       aiSearchIndexName: $(aiSearchIndexName)

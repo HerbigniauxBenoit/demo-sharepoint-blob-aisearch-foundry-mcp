@@ -6,7 +6,7 @@ parameters:
     type: string
   - name: sharedResourceGroupName
     type: string
-  - name: functionAppName
+  - name: containerAppName          # renommé (était functionAppName)
     type: string
   - name: managedIdentityName
     type: string
@@ -66,44 +66,44 @@ stages:
                 echo ""
 
                 APP_STATE=$(az containerapp show \
-                  --name "${{ parameters.functionAppName }}" \
+                  --name "${{ parameters.containerAppName }}" \
                   --resource-group "${{ parameters.sharedResourceGroupName }}" \
                   --query "properties.runningStatus" -o tsv)
 
-                echo "=== Function App ==="
-                echo "Name  : ${{ parameters.functionAppName }}"
+                echo "=== Container App ==="
+                echo "Name  : ${{ parameters.containerAppName }}"
                 echo "State : $APP_STATE"
                 echo "Mode  : TimerTrigger only"
                 echo ""
-                
+
                 echo "=== Ressources créées ==="
                 echo "├── MSI            : ${{ parameters.managedIdentityName }}"
-                echo "├── Function App   : ${{ parameters.functionAppName }}"
+                echo "├── Container App  : ${{ parameters.containerAppName }}"
                 echo "├── Blob Container : ${{ parameters.blobContainerName }}"
                 echo "├── AI Search Index: ${{ parameters.aiSearchIndexName }}"
                 echo "├── Data Source    : ${{ parameters.dataSourceName }}"
                 echo "└── Indexer        : ${{ parameters.indexerName }}"
                 echo ""
-                
+
                 echo "=== Configuration SharePoint ==="
                 echo "Site   : ${{ parameters.sharepointSiteUrl }}"
                 echo "Drive  : ${{ parameters.sharepointDriveName }}"
                 echo "Folder : ${{ parameters.sharepointFolderPath }}"
                 echo ""
-                
+
                 echo "=== Configuration Sync ==="
                 echo "Schedule         : ${{ parameters.syncSchedule }}"
                 echo "Delete orphans   : ${{ parameters.deleteOrphanedBlobs }}"
                 echo "Sync permissions : ${{ parameters.syncPermissions }}"
                 echo ""
-                
+
                 echo "========================================================"
                 echo "    ⚠️  ACTION MANUELLE REQUISE                         "
                 echo "========================================================"
                 echo ""
                 echo "Configurez les permissions Graph dans Entra ID :"
                 echo "1. Allez dans Entra ID → Enterprise Applications"
-                echo "2. Trouvez la MSI '${{ parameters.managedIdentityName }}'"
+                echo "2. Trouvez la system identity de '${{ parameters.containerAppName }}'"
                 echo "3. Ajoutez la permission application 'Sites.Selected' (Microsoft Graph)"
                 echo "4. Accordez le consentement administrateur"
                 echo "5. Autorisez explicitement le site SharePoint cible pour cette identite"
@@ -113,6 +113,6 @@ stages:
                 echo "========================================================"
                 echo ""
                 echo "Une fois les permissions Graph configurees, verifier les logs :"
-                echo "   az containerapp logs show --name ${{ parameters.functionAppName }} --resource-group ${{ parameters.sharedResourceGroupName }} --follow"
+                echo "   az containerapp logs show --name ${{ parameters.containerAppName }} --resource-group ${{ parameters.sharedResourceGroupName }} --follow"
                 echo ""
                 echo "========================================================"

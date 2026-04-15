@@ -6,11 +6,11 @@ parameters:
     type: string
   - name: sharedResourceGroupName
     type: string
-  - name: functionAppName
+  - name: containerAppName
     type: string
   - name: containerAppsEnvName
     type: string
-  - name: managedIdentityName
+  - name: managedIdentityName 
     type: string
   - name: appInsightsName
     type: string
@@ -42,11 +42,11 @@ parameters:
 
 stages:
   - stage: DeployContainerApp
-    displayName: '🚀 6. Déployer Function App (Container Apps)'
+    displayName: '🚀 6. Déployer Container App'
     dependsOn: ${{ parameters.dependsOn }}
     jobs:
       - job: DeployApp
-        displayName: 'Déployer la Function App'
+        displayName: 'Déployer la Container App'
         pool:
           vmImage: 'ubuntu-latest'
         steps:
@@ -54,9 +54,9 @@ stages:
             parameters:
               azureSubscription: ${{ parameters.azureSubscription }}
               sharedResourceGroupName: ${{ parameters.sharedResourceGroupName }}
-              functionAppName: ${{ parameters.functionAppName }}
+              containerAppName: ${{ parameters.containerAppName }}
               containerAppsEnvName: ${{ parameters.containerAppsEnvName }}
-              managedIdentityName: ${{ parameters.managedIdentityName }}
+              managedIdentityName: ${{ parameters.managedIdentityName }}  # ← remis
               appInsightsName: ${{ parameters.appInsightsName }}
               acrName: ${{ parameters.acrName }}
               imageName: ${{ parameters.imageName }}
