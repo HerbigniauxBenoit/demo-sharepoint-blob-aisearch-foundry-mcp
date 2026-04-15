@@ -49,11 +49,6 @@ parameters:
     type: boolean
     default: true
 
-  - name: syncPermissions
-    displayName: '🔐 Synchroniser les permissions'
-    type: boolean
-    default: false
-
   - name: imageTag
     displayName: '🐳 Tag de l''image Docker'
     type: string
@@ -112,7 +107,6 @@ stages:
       sharepointFolderPath: ${{ parameters.sharepointFolderPath }}
       syncSchedule: ${{ parameters.syncSchedule }}
       deleteOrphanedBlobs: ${{ parameters.deleteOrphanedBlobs }}
-      syncPermissions: ${{ parameters.syncPermissions }}
 
   # Stage 2 : Créer MSI
   - template: templates/stages/stage-create-msi.yml
@@ -183,7 +177,6 @@ stages:
       sharepointFolderPath: ${{ parameters.sharepointFolderPath }}
       syncSchedule: ${{ parameters.syncSchedule }}
       deleteOrphanedBlobs: ${{ parameters.deleteOrphanedBlobs }}
-      syncPermissions: ${{ parameters.syncPermissions }}
       dependsOn:
         - Validation
         - AssignRBAC
@@ -207,6 +200,5 @@ stages:
       sharepointFolderPath: ${{ parameters.sharepointFolderPath }}
       syncSchedule: ${{ parameters.syncSchedule }}
       deleteOrphanedBlobs: ${{ parameters.deleteOrphanedBlobs }}
-      syncPermissions: ${{ parameters.syncPermissions }}
       dependsOn:
         - DeployContainerApp

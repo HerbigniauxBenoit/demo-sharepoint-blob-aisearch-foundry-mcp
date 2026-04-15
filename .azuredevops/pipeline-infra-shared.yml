@@ -123,6 +123,8 @@ stages:
       resourceGroupName: $(resourceGroupName)
       location: ${{ parameters.location }}
       environment: ${{ parameters.environment }}
+      dependsOn:
+        - Validation
 
   # Stage 3 : Créer Monitoring (Log Analytics + App Insights)
   - template: templates/stages/stage-create-monitoring.yml

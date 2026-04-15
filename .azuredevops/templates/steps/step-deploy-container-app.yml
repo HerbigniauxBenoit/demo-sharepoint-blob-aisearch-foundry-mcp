@@ -34,8 +34,6 @@ parameters:
     type: string
   - name: deleteOrphanedBlobs
     type: string
-  - name: syncPermissions
-    type: string
 
 steps:
   - task: AzureCLI@2
@@ -70,13 +68,20 @@ steps:
           --only-show-errors >/dev/null
 
         # Récupérer le resource ID de la MSI user-assigned
-        MSI_ID=$(az identity show \
+        MSI_RESOURCE_ID=$(az identity show \
           --name "${{ parameters.managedIdentityName }}" \
           --resource-group "${{ parameters.sharedResourceGroupName }}" \
           --query id -o tsv \
           --only-show-errors)
 
-        echo "MSI ID : $MSI_ID"
+        MSI_CLIENT_ID=$(az identity show \
+          --name "${{ parameters.managedIdentityName }}" \
+          --resource-group "${{ parameters.sharedResourceGroupName }}" \
+          --query clientId -o tsv \
+          --only-show-errors)
+
+        echo "MSI Resource ID : $MSI_RESOURCE_ID"
+        echo "MSI Client ID   : $MSI_CLIENT_ID"
         echo "Création de la Container App avec image placeholder..."
 
         az containerapp create \
@@ -84,7 +89,7 @@ steps:
           --resource-group "${{ parameters.sharedResourceGroupName }}" \
           --environment "${{ parameters.containerAppsEnvName }}" \
           --image "mcr.microsoft.com/azuredocs/containerapps-helloworld:latest" \
-          --user-assigned "$MSI_ID" \
+          --user-assigned "$MSI_RESOURCE_ID" \
           --min-replicas 1 \
           --max-replicas 1 \
           --only-show-errors
@@ -120,16 +125,23 @@ steps:
           --query loginServer -o tsv \
           --only-show-errors)
 
-        # Récupérer le client ID de la MSI user-assigned (requis pour registry set)
-        MSI_ID=$(az identity show \
+        # Récupérer le resource ID et le client ID de la MSI user-assigned
+        MSI_RESOURCE_ID=$(az identity show \
           --name "${{ parameters.managedIdentityName }}" \
           --resource-group "${{ parameters.sharedResourceGroupName }}" \
           --query id -o tsv \
           --only-show-errors)
 
+        MSI_CLIENT_ID=$(az identity show \
+          --name "${{ parameters.managedIdentityName }}" \
+          --resource-group "${{ parameters.sharedResourceGroupName }}" \
+          --query clientId -o tsv \
+          --only-show-errors)
+
         IMAGE_NAME="$ACR_LOGIN_SERVER/${{ parameters.imageName }}:${{ parameters.imageTag }}"
 
-        echo "MSI Client ID  : $MSI_ID"
+        echo "MSI Resource ID: $MSI_RESOURCE_ID"
+        echo "MSI Client ID  : $MSI_CLIENT_ID"
         echo "Image          : $IMAGE_NAME"
 
         echo "Configuration du registry ACR avec la MSI user-assigned..."
@@ -138,7 +150,7 @@ steps:
           --name "${{ parameters.containerAppName }}" \
           --resource-group "${{ parameters.sharedResourceGroupName }}" \
           --server "$ACR_LOGIN_SERVER" \
-          --identity "$MSI_ID" \
+          --identity "$MSI_RESOURCE_ID" \
           --only-show-errors
 
         echo "Mise à jour de l'image et des variables d'environnement..."
@@ -153,14 +165,13 @@ steps:
             "SHAREPOINT_FOLDER_PATH=${{ parameters.sharepointFolderPath }}" \
             "AZURE_STORAGE_ACCOUNT_NAME=${{ parameters.storageAccountName }}" \
             "AZURE_BLOB_CONTAINER_NAME=${{ parameters.blobContainerName }}" \
-            "AZURE_BLOB_PREFIX=" \
             "DELETE_ORPHANED_BLOBS=${{ parameters.deleteOrphanedBlobs }}" \
-            "SYNC_PERMISSIONS=${{ parameters.syncPermissions }}" \
             "SYNC_SCHEDULE=${{ parameters.syncSchedule }}" \
+            "AZURE_CLIENT_ID=$MSI_CLIENT_ID" \
             "APPLICATIONINSIGHTS_CONNECTION_STRING=$APP_INSIGHTS_CONNECTION_STRING" \
-            "WEBSITES_INCLUDE_CLOUD_CERTS=true" \
             "AzureWebJobsStorage__accountName=${{ parameters.storageAccountName }}" \
             "AzureWebJobsStorage__credential=managedidentity" \
+            "AzureWebJobsStorage__clientId=$MSI_CLIENT_ID" \
           --only-show-errors
 
         az containerapp show \

@@ -32,8 +32,6 @@ parameters:
     type: string
   - name: deleteOrphanedBlobs
     type: string
-  - name: syncPermissions
-    type: string
   - name: dependsOn
     type: object
     default: []
@@ -94,7 +92,6 @@ stages:
                 echo "=== Configuration Sync ==="
                 echo "Schedule         : ${{ parameters.syncSchedule }}"
                 echo "Delete orphans   : ${{ parameters.deleteOrphanedBlobs }}"
-                echo "Sync permissions : ${{ parameters.syncPermissions }}"
                 echo ""
 
                 echo "========================================================"

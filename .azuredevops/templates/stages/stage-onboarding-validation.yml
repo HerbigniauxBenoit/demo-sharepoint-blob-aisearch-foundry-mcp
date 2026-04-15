@@ -42,8 +42,6 @@ parameters:
     type: string
   - name: deleteOrphanedBlobs
     type: string
-  - name: syncPermissions
-    type: string
 
 stages:
   - stage: Validation
@@ -72,7 +70,6 @@ stages:
               echo "=== Configuration Sync ==="
               echo "Schedule         : ${{ parameters.syncSchedule }}"
               echo "Delete orphans   : ${{ parameters.deleteOrphanedBlobs }}"
-              echo "Sync permissions : ${{ parameters.syncPermissions }}"
               echo ""
               echo "=== Image Docker ==="
               echo "Image            : ${{ parameters.acrName }}.azurecr.io/${{ parameters.imageName }}:${{ parameters.imageTag }}"
