@@ -1,0 +1,33 @@
+# =============================================================================
+# Step Template : Supprimer Managed Identity
+# =============================================================================
+parameters:
+  - name: azureSubscription
+    type: string
+  - name: resourceGroupName
+    type: string
+  - name: managedIdentityName
+    type: string
+
+steps:
+  - task: AzureCLI@2
+    displayName: 'Delete Managed Identity'
+    inputs:
+      azureSubscription: ${{ parameters.azureSubscription }}
+      scriptType: 'bash'
+      scriptLocation: 'inlineScript'
+      inlineScript: |
+        set -euo pipefail
+
+        if az identity show \
+          --name "${{ parameters.managedIdentityName }}" \
+          --resource-group "${{ parameters.resourceGroupName }}" >/dev/null 2>&1; then
+          echo "Deleting Managed Identity '${{ parameters.managedIdentityName }}'..."
+          az identity delete \
+            --name "${{ parameters.managedIdentityName }}" \
+            --resource-group "${{ parameters.resourceGroupName }}" \
+            --only-show-errors
+          echo "Managed Identity deleted."
+        else
+          echo "Managed Identity already absent."
+        fi

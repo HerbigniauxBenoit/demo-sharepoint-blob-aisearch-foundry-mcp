@@ -1,0 +1,38 @@
+# =============================================================================
+# Stage Template : Supprimer les roles RBAC
+# =============================================================================
+parameters:
+  - name: azureSubscription
+    type: string
+  - name: resourceGroupName
+    type: string
+  - name: managedIdentityName
+    type: string
+  - name: storageAccountName
+    type: string
+  - name: aiSearchName
+    type: string
+  - name: acrName
+    type: string
+  - name: dependsOn
+    type: object
+    default: []
+
+stages:
+  - stage: RemoveRBAC
+    displayName: '5. Remove RBAC assignments'
+    dependsOn: ${{ parameters.dependsOn }}
+    jobs:
+      - job: RemoveRBACJob
+        displayName: 'Remove MSI RBAC assignments'
+        pool:
+          vmImage: 'ubuntu-latest'
+        steps:
+          - template: ../steps/step-remove-rbac-assignments.yml
+            parameters:
+              azureSubscription: ${{ parameters.azureSubscription }}
+              resourceGroupName: ${{ parameters.resourceGroupName }}
+              managedIdentityName: ${{ parameters.managedIdentityName }}
+              storageAccountName: ${{ parameters.storageAccountName }}
+              aiSearchName: ${{ parameters.aiSearchName }}
+              acrName: ${{ parameters.acrName }}

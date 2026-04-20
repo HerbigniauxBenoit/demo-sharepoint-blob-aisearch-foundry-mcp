@@ -1,0 +1,80 @@
+# =============================================================================
+# Step Template : Supprimer les roles RBAC d une MSI
+# =============================================================================
+parameters:
+  - name: azureSubscription
+    type: string
+  - name: resourceGroupName
+    type: string
+  - name: managedIdentityName
+    type: string
+  - name: storageAccountName
+    type: string
+  - name: aiSearchName
+    type: string
+  - name: acrName
+    type: string
+
+steps:
+  - task: AzureCLI@2
+    displayName: 'Remove RBAC assignments'
+    inputs:
+      azureSubscription: ${{ parameters.azureSubscription }}
+      scriptType: 'bash'
+      scriptLocation: 'inlineScript'
+      inlineScript: |
+        set -euo pipefail
+
+        if ! az identity show \
+          --name "${{ parameters.managedIdentityName }}" \
+          --resource-group "${{ parameters.resourceGroupName }}" >/dev/null 2>&1; then
+          echo "Managed Identity already absent. RBAC cleanup skipped."
+          exit 0
+        fi
+
+        MSI_PRINCIPAL_ID=$(az identity show \
+          --name "${{ parameters.managedIdentityName }}" \
+          --resource-group "${{ parameters.resourceGroupName }}" \
+          --query principalId -o tsv)
+
+        STORAGE_ID=$(az storage account show \
+          --name "${{ parameters.storageAccountName }}" \
+          --resource-group "${{ parameters.resourceGroupName }}" \
+          --query id -o tsv)
+
+        SEARCH_ID=$(az search service show \
+          --name "${{ parameters.aiSearchName }}" \
+          --resource-group "${{ parameters.resourceGroupName }}" \
+          --query id -o tsv)
+
+        ACR_ID=$(az acr show \
+          --name "${{ parameters.acrName }}" \
+          --resource-group "${{ parameters.resourceGroupName }}" \
+          --query id -o tsv)
+
+        delete_role_if_present() {
+          local role_name="$1"
+          local scope_id="$2"
+
+          EXISTING_IDS=$(az role assignment list \
+            --assignee "$MSI_PRINCIPAL_ID" \
+            --scope "$scope_id" \
+            --query "[?roleDefinitionName=='$role_name'].id" -o tsv || true)
+
+          if [ -z "$EXISTING_IDS" ]; then
+            echo "Role '$role_name' not found on scope '$scope_id'."
+            return
+          fi
+
+          while IFS= read -r assignment_id; do
+            [ -z "$assignment_id" ] && continue
+            az role assignment delete --ids "$assignment_id" --only-show-errors
+            echo "Deleted role assignment: $role_name"
+          done <<< "$EXISTING_IDS"
+        }
+
+        delete_role_if_present "Storage Blob Data Owner" "$STORAGE_ID"
+        delete_role_if_present "Storage Queue Data Contributor" "$STORAGE_ID"
+        delete_role_if_present "Storage Table Data Contributor" "$STORAGE_ID"
+        delete_role_if_present "Search Index Data Contributor" "$SEARCH_ID"
+        delete_role_if_present "AcrPull" "$ACR_ID"

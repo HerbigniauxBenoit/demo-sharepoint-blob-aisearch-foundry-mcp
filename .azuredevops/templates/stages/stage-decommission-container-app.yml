@@ -1,0 +1,29 @@
+# =============================================================================
+# Stage Template : Supprimer Container App
+# =============================================================================
+parameters:
+  - name: azureSubscription
+    type: string
+  - name: resourceGroupName
+    type: string
+  - name: containerAppName
+    type: string
+  - name: dependsOn
+    type: object
+    default: []
+
+stages:
+  - stage: DeleteContainerApp
+    displayName: '2. Delete Container App'
+    dependsOn: ${{ parameters.dependsOn }}
+    jobs:
+      - job: DeleteContainerAppJob
+        displayName: 'Delete companion container app'
+        pool:
+          vmImage: 'ubuntu-latest'
+        steps:
+          - template: ../steps/step-delete-container-app.yml
+            parameters:
+              azureSubscription: ${{ parameters.azureSubscription }}
+              resourceGroupName: ${{ parameters.resourceGroupName }}
+              containerAppName: ${{ parameters.containerAppName }}

@@ -1,0 +1,162 @@
+# =============================================================================
+# Stage Template : Validation des parametres de decommission
+# =============================================================================
+parameters:
+  - name: azureSubscription
+    type: string
+  - name: environment
+    type: string
+  - name: companionName
+    type: string
+  - name: confirmDeletion
+    type: boolean
+  - name: sharedResourceGroupName
+    type: string
+  - name: storageAccountName
+    type: string
+  - name: aiSearchName
+    type: string
+  - name: containerAppsEnvName
+    type: string
+  - name: appInsightsName
+    type: string
+  - name: acrName
+    type: string
+  - name: containerAppName
+    type: string
+  - name: managedIdentityName
+    type: string
+  - name: blobContainerName
+    type: string
+  - name: aiSearchIndexName
+    type: string
+  - name: aiSearchDataSourceName
+    type: string
+  - name: aiSearchIndexerName
+    type: string
+
+stages:
+  - stage: Validation
+    displayName: '1. Validation decommission'
+    pool: gptrusted-${{ parameters.environment }}
+    jobs:
+      - job: ValidateParameters
+        displayName: 'Valider parametres et guard-rails'
+        pool:
+          vmImage: 'ubuntu-latest'
+        steps:
+          - bash: |
+              set -euo pipefail
+
+              echo "================================================"
+              echo "        DECOMMISSION COMPAGNON - VALIDATION     "
+              echo "================================================"
+              echo ""
+              echo "Companion       : ${{ parameters.companionName }}"
+              echo "Environment     : ${{ parameters.environment }}"
+              echo "Resource Group  : ${{ parameters.sharedResourceGroupName }}"
+              echo ""
+              echo "Resources targeted for deletion:"
+              echo "- Container App : ${{ parameters.containerAppName }}"
+              echo "- Managed Id    : ${{ parameters.managedIdentityName }}"
+              echo "- Blob Container: ${{ parameters.blobContainerName }}"
+              echo "- AI Search idx : ${{ parameters.aiSearchIndexName }}"
+              echo "- AI Search ds  : ${{ parameters.aiSearchDataSourceName }}"
+              echo "- AI Search idxr: ${{ parameters.aiSearchIndexerName }}"
+              echo ""
+
+              if [[ ! "${{ parameters.environment }}" =~ ^(dev|nprd|prod)$ ]]; then
+                echo "ERROR: invalid environment '${{ parameters.environment }}'"
+                exit 1
+              fi
+
+              if [[ ! "${{ parameters.companionName }}" =~ ^[a-z0-9]([a-z0-9-]*[a-z0-9])?$ ]]; then
+                echo "ERROR: invalid companionName format"
+                exit 1
+              fi
+
+              if [ "${{ parameters.confirmDeletion }}" != "true" ]; then
+                echo "ERROR: confirmDeletion must be true to run decommission"
+                exit 1
+              fi
+
+              echo "Validation checks passed."
+            displayName: 'Afficher et valider les parametres'
+
+          - template: ../steps/step-verify-shared-resources.yml
+            parameters:
+              azureSubscription: ${{ parameters.azureSubscription }}
+              sharedResourceGroupName: ${{ parameters.sharedResourceGroupName }}
+              storageAccountName: ${{ parameters.storageAccountName }}
+              aiSearchName: ${{ parameters.aiSearchName }}
+              containerAppsEnvName: ${{ parameters.containerAppsEnvName }}
+              appInsightsName: ${{ parameters.appInsightsName }}
+
+          - task: AzureCLI@2
+            displayName: 'Verifier l existence d au moins une ressource compagnon'
+            inputs:
+              azureSubscription: ${{ parameters.azureSubscription }}
+              scriptType: 'bash'
+              scriptLocation: 'inlineScript'
+              inlineScript: |
+                set -euo pipefail
+
+                FOUND=0
+
+                if az containerapp show \
+                  --name "${{ parameters.containerAppName }}" \
+                  --resource-group "${{ parameters.sharedResourceGroupName }}" >/dev/null 2>&1; then
+                  echo "Found Container App"
+                  FOUND=1
+                fi
+
+                if az identity show \
+                  --name "${{ parameters.managedIdentityName }}" \
+                  --resource-group "${{ parameters.sharedResourceGroupName }}" >/dev/null 2>&1; then
+                  echo "Found Managed Identity"
+                  FOUND=1
+                fi
+
+                STORAGE_KEY=$(az storage account keys list \
+                  --account-name "${{ parameters.storageAccountName }}" \
+                  --resource-group "${{ parameters.sharedResourceGroupName }}" \
+                  --query "[0].value" -o tsv)
+
+                EXISTS=$(az storage container exists \
+                  --name "${{ parameters.blobContainerName }}" \
+                  --account-name "${{ parameters.storageAccountName }}" \
+                  --account-key "$STORAGE_KEY" \
+                  --query exists -o tsv)
+
+                if [ "$EXISTS" = "true" ]; then
+                  echo "Found Blob Container"
+                  FOUND=1
+                fi
+
+                SEARCH_KEY=$(az search admin-key show \
+                  --service-name "${{ parameters.aiSearchName }}" \
+                  --resource-group "${{ parameters.sharedResourceGroupName }}" \
+                  --query primaryKey -o tsv)
+
+                SEARCH_URL="https://${{ parameters.aiSearchName }}.search.windows.net"
+
+                for TARGET in \
+                  "indexers/${{ parameters.aiSearchIndexerName }}" \
+                  "indexes/${{ parameters.aiSearchIndexName }}" \
+                  "datasources/${{ parameters.aiSearchDataSourceName }}"; do
+                  HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
+                    -X GET "$SEARCH_URL/$TARGET?api-version=2024-07-01" \
+                    -H "api-key: $SEARCH_KEY")
+
+                  if [ "$HTTP_STATUS" = "200" ]; then
+                    echo "Found AI Search asset: $TARGET"
+                    FOUND=1
+                  fi
+                done
+
+                if [ "$FOUND" = "0" ]; then
+                  echo "ERROR: no companion resource found to delete."
+                  exit 1
+                fi
+
+                echo "At least one resource exists. Decommission can continue."

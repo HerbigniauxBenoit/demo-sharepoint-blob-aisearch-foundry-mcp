@@ -1,0 +1,45 @@
+# =============================================================================
+# Step Template : Supprimer Blob container
+# =============================================================================
+parameters:
+  - name: azureSubscription
+    type: string
+  - name: resourceGroupName
+    type: string
+  - name: storageAccountName
+    type: string
+  - name: blobContainerName
+    type: string
+
+steps:
+  - task: AzureCLI@2
+    displayName: 'Delete Blob container'
+    inputs:
+      azureSubscription: ${{ parameters.azureSubscription }}
+      scriptType: 'bash'
+      scriptLocation: 'inlineScript'
+      inlineScript: |
+        set -euo pipefail
+
+        STORAGE_KEY=$(az storage account keys list \
+          --account-name "${{ parameters.storageAccountName }}" \
+          --resource-group "${{ parameters.resourceGroupName }}" \
+          --query "[0].value" -o tsv)
+
+        EXISTS=$(az storage container exists \
+          --name "${{ parameters.blobContainerName }}" \
+          --account-name "${{ parameters.storageAccountName }}" \
+          --account-key "$STORAGE_KEY" \
+          --query exists -o tsv)
+
+        if [ "$EXISTS" = "true" ]; then
+          echo "Deleting Blob container '${{ parameters.blobContainerName }}'..."
+          az storage container delete \
+            --name "${{ parameters.blobContainerName }}" \
+            --account-name "${{ parameters.storageAccountName }}" \
+            --account-key "$STORAGE_KEY" \
+            --only-show-errors >/dev/null
+          echo "Blob container deleted."
+        else
+          echo "Blob container already absent."
+        fi

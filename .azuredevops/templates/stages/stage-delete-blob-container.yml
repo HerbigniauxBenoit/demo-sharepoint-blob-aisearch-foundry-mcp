@@ -1,0 +1,32 @@
+# =============================================================================
+# Stage Template : Supprimer Blob container
+# =============================================================================
+parameters:
+  - name: azureSubscription
+    type: string
+  - name: resourceGroupName
+    type: string
+  - name: storageAccountName
+    type: string
+  - name: blobContainerName
+    type: string
+  - name: dependsOn
+    type: object
+    default: []
+
+stages:
+  - stage: DeleteBlobContainer
+    displayName: '4. Delete Blob container'
+    dependsOn: ${{ parameters.dependsOn }}
+    jobs:
+      - job: DeleteBlobContainerJob
+        displayName: 'Delete companion blob container'
+        pool:
+          vmImage: 'ubuntu-latest'
+        steps:
+          - template: ../steps/step-delete-blob-container.yml
+            parameters:
+              azureSubscription: ${{ parameters.azureSubscription }}
+              resourceGroupName: ${{ parameters.resourceGroupName }}
+              storageAccountName: ${{ parameters.storageAccountName }}
+              blobContainerName: ${{ parameters.blobContainerName }}

@@ -1,0 +1,89 @@
+# =============================================================================
+# Stage Template : Créer le réseau partagé (VNet + subnet Private Endpoints)
+# =============================================================================
+parameters:
+  - name: azureSubscription
+    type: string
+  - name: resourceGroupName
+    type: string
+  - name: location
+    type: string
+  - name: privateEndpointVnetName
+    type: string
+  - name: privateEndpointSubnetName
+    type: string
+  - name: environment
+    type: string
+  - name: dependsOn
+    type: object
+    default: []
+
+stages:
+  - stage: CreateNetwork
+    displayName: '🌐 Créer réseau partagé'
+    dependsOn: ${{ parameters.dependsOn }}
+    jobs:
+      - job: CreateSharedNetwork
+        displayName: 'Créer VNet et subnet Private Endpoints'
+        pool:
+          vmImage: 'ubuntu-latest'
+        steps:
+          - task: AzureCLI@2
+            displayName: '🌐 az network vnet/subnet create'
+            inputs:
+              azureSubscription: ${{ parameters.azureSubscription }}
+              scriptType: 'bash'
+              scriptLocation: 'inlineScript'
+              inlineScript: |
+                set -euo pipefail
+
+                RG="${{ parameters.resourceGroupName }}"
+                LOC="${{ parameters.location }}"
+                VNET_NAME="${{ parameters.privateEndpointVnetName }}"
+                SUBNET_NAME="${{ parameters.privateEndpointSubnetName }}"
+
+                if az network vnet show --resource-group "$RG" --name "$VNET_NAME" >/dev/null 2>&1; then
+                  echo "ℹ️  VNet '$VNET_NAME' déjà présent"
+
+                  az network vnet update \
+                    --resource-group "$RG" \
+                    --name "$VNET_NAME" \
+                    --tags environment="${{ parameters.environment }}" \
+                    --only-show-errors >/dev/null
+                else
+                  echo "Création du VNet '$VNET_NAME'"
+
+                  az network vnet create \
+                    --resource-group "$RG" \
+                    --name "$VNET_NAME" \
+                    --location "$LOC" \
+                    --address-prefixes "10.90.0.0/16" \
+                    --tags environment="${{ parameters.environment }}" \
+                    --only-show-errors >/dev/null
+                fi
+
+                if az network vnet subnet show \
+                  --resource-group "$RG" \
+                  --vnet-name "$VNET_NAME" \
+                  --name "$SUBNET_NAME" >/dev/null 2>&1; then
+                  echo "ℹ️  Subnet '$SUBNET_NAME' déjà présent"
+                else
+                  echo "Création du subnet '$SUBNET_NAME'"
+
+                  az network vnet subnet create \
+                    --resource-group "$RG" \
+                    --vnet-name "$VNET_NAME" \
+                    --name "$SUBNET_NAME" \
+                    --address-prefixes "10.90.10.0/24" \
+                    --disable-private-endpoint-network-policies true \
+                    --only-show-errors >/dev/null
+                fi
+
+                az network vnet subnet update \
+                  --resource-group "$RG" \
+                  --vnet-name "$VNET_NAME" \
+                  --name "$SUBNET_NAME" \
+                  --disable-private-endpoint-network-policies true \
+                  --only-show-errors >/dev/null
+
+                echo "✅ Réseau partagé prêt: $VNET_NAME / $SUBNET_NAME"

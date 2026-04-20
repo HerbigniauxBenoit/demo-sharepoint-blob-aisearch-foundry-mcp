@@ -1,0 +1,29 @@
+# =============================================================================
+# Stage Template : Supprimer Managed Identity
+# =============================================================================
+parameters:
+  - name: azureSubscription
+    type: string
+  - name: resourceGroupName
+    type: string
+  - name: managedIdentityName
+    type: string
+  - name: dependsOn
+    type: object
+    default: []
+
+stages:
+  - stage: DeleteManagedIdentity
+    displayName: '6. Delete managed identity'
+    dependsOn: ${{ parameters.dependsOn }}
+    jobs:
+      - job: DeleteManagedIdentityJob
+        displayName: 'Delete companion managed identity'
+        pool:
+          vmImage: 'ubuntu-latest'
+        steps:
+          - template: ../steps/step-delete-managed-identity.yml
+            parameters:
+              azureSubscription: ${{ parameters.azureSubscription }}
+              resourceGroupName: ${{ parameters.resourceGroupName }}
+              managedIdentityName: ${{ parameters.managedIdentityName }}

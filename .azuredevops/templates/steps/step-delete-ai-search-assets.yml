@@ -1,0 +1,54 @@
+# =============================================================================
+# Step Template : Supprimer assets AI Search
+# =============================================================================
+parameters:
+  - name: azureSubscription
+    type: string
+  - name: resourceGroupName
+    type: string
+  - name: aiSearchName
+    type: string
+  - name: indexName
+    type: string
+  - name: dataSourceName
+    type: string
+  - name: indexerName
+    type: string
+
+steps:
+  - task: AzureCLI@2
+    displayName: 'Delete AI Search assets'
+    inputs:
+      azureSubscription: ${{ parameters.azureSubscription }}
+      scriptType: 'bash'
+      scriptLocation: 'inlineScript'
+      inlineScript: |
+        set -euo pipefail
+
+        SEARCH_KEY=$(az search admin-key show \
+          --service-name "${{ parameters.aiSearchName }}" \
+          --resource-group "${{ parameters.resourceGroupName }}" \
+          --query primaryKey -o tsv)
+
+        SEARCH_URL="https://${{ parameters.aiSearchName }}.search.windows.net"
+
+        delete_asset() {
+          local asset_type="$1"
+          local asset_name="$2"
+
+          HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
+            -X DELETE "$SEARCH_URL/$asset_type/$asset_name?api-version=2024-07-01" \
+            -H "api-key: $SEARCH_KEY")
+
+          if [ "$HTTP_STATUS" = "204" ] || [ "$HTTP_STATUS" = "404" ]; then
+            echo "$asset_type/$asset_name removed or already absent (HTTP $HTTP_STATUS)."
+          else
+            echo "Failed to delete $asset_type/$asset_name (HTTP $HTTP_STATUS)."
+            exit 1
+          fi
+        }
+
+        # Delete in reverse dependency order
+        delete_asset "indexers" "${{ parameters.indexerName }}"
+        delete_asset "indexes" "${{ parameters.indexName }}"
+        delete_asset "datasources" "${{ parameters.dataSourceName }}"

@@ -54,6 +54,11 @@ parameters:
     type: string
     default: 'latest'
 
+  - name: allowSecurity
+    displayName: '🔐 Vérifier le durcissement réseau (dépend de allowSecurity infra)'
+    type: boolean
+    default: false
+
 # -----------------------------------------------------------------------------
 # Variables
 # -----------------------------------------------------------------------------
@@ -76,6 +81,10 @@ variables:
   # ACR
   acrName: 'acrcompanion${{ parameters.environment }}'
   imageName: 'sharepoint-sync'
+
+  # Réseau
+  privateEndpointVnetName: 'vnet-companion-shared-${{ parameters.environment }}'
+  privateEndpointSubnetName: 'snet-private-endpoints'
 
   # Service Connection
   azureSubscription: 'SVC_GPTrusted_${{ upper(parameters.environment) }}'
@@ -182,7 +191,27 @@ stages:
         - AssignRBAC
         - ConfigureAISearch
 
-  # Stage 7 : Résumé
+  # Stage 8 : Sécurité du compagnon (optionnel)
+  - ${{ if eq(parameters.allowSecurity, true) }}:
+    - template: templates/stages/stage-apply-companion-security.yml
+      parameters:
+        azureSubscription: $(azureSubscription)
+        resourceGroupName: $(sharedResourceGroupName)
+        environment: ${{ parameters.environment }}
+        companionName: ${{ parameters.companionName }}
+        storageAccountName: $(storageAccountName)
+        blobContainerName: $(blobContainerName)
+        aiSearchName: $(aiSearchName)
+        aiSearchIndexName: $(aiSearchIndexName)
+        aiSearchDataSourceName: $(aiSearchDataSourceName)
+        aiSearchIndexerName: $(aiSearchIndexerName)
+        containerAppName: $(containerAppName)
+        appInsightsName: $(appInsightsName)
+        managedIdentityName: $(managedIdentityName)
+        dependsOn:
+          - DeployContainerApp
+
+  # Stage 9 : Résumé
   - template: templates/stages/stage-onboarding-summary.yml
     parameters:
       azureSubscription: $(azureSubscription)
@@ -202,3 +231,5 @@ stages:
       deleteOrphanedBlobs: ${{ parameters.deleteOrphanedBlobs }}
       dependsOn:
         - DeployContainerApp
+        - ${{ if eq(parameters.allowSecurity, true) }}:
+          - ApplyCompanionSecurity

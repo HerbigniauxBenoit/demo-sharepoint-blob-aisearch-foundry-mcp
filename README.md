@@ -40,5 +40,7 @@ These steps are intentionally not automated in pipelines.
 1. Build and push the sync image using .azuredevops/pipeline-ci-cd.yml.
 2. Run shared infrastructure pipeline once per environment.
 3. Run companion onboarding pipeline once per companion.
+4. When needed, run companion decommission pipeline to remove one companion and its dedicated assets.
 
 The onboarding pipeline deploys an Azure Function App on Container Apps hosting, configures timer settings and app settings, and binds the companion managed identity.
+The decommission pipeline removes the companion Container App, AI Search assets, Blob container, RBAC assignments, and managed identity.

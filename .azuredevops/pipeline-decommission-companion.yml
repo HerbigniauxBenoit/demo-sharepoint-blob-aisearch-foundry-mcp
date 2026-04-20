@@ -1,0 +1,138 @@
+# =============================================================================
+# Pipeline : Decommission d'un compagnon
+# =============================================================================
+# Trigger   : Manuel
+# Objectif  : Supprimer les ressources d'un compagnon existant
+# Prerequis : Pipeline infra partagee deja executee
+# =============================================================================
+
+trigger: none
+
+parameters:
+  - name: environment
+    displayName: 'Environment'
+    type: string
+    default: 'dev'
+    values:
+      - dev
+      - nprd
+      - prod
+
+  - name: companionName
+    displayName: 'Companion name (ex: hr-assistant)'
+    type: string
+
+  - name: confirmDeletion
+    displayName: 'I confirm this decommission operation'
+    type: boolean
+    default: false
+
+variables:
+  # Shared resources
+  sharedResourceGroupName: 'rg-companion-${{ parameters.environment }}'
+  storageAccountName: 'stcompanionshared${{ parameters.environment }}'
+  aiSearchName: 'srch-companion-shared-${{ parameters.environment }}'
+  containerAppsEnvName: 'cae-companion-shared-${{ parameters.environment }}'
+  appInsightsName: 'appi-companion-shared-${{ parameters.environment }}'
+
+  # Companion resources
+  managedIdentityName: 'id-${{ parameters.companionName }}-${{ parameters.environment }}'
+  containerAppName: 'ca-${{ parameters.companionName }}-sync-${{ parameters.environment }}'
+  blobContainerName: '${{ parameters.companionName }}'
+  aiSearchIndexName: 'idx-${{ parameters.companionName }}'
+  aiSearchDataSourceName: 'ds-${{ parameters.companionName }}'
+  aiSearchIndexerName: 'idxr-${{ parameters.companionName }}'
+
+  # ACR
+  acrName: 'acrcompanion${{ parameters.environment }}'
+
+  # Service connection
+  azureSubscription: 'SVC_GPTrusted_${{ upper(parameters.environment) }}'
+
+stages:
+  - template: templates/stages/stage-decommission-validation.yml
+    parameters:
+      azureSubscription: $(azureSubscription)
+      environment: ${{ parameters.environment }}
+      companionName: ${{ parameters.companionName }}
+      confirmDeletion: ${{ parameters.confirmDeletion }}
+      sharedResourceGroupName: $(sharedResourceGroupName)
+      storageAccountName: $(storageAccountName)
+      aiSearchName: $(aiSearchName)
+      containerAppsEnvName: $(containerAppsEnvName)
+      appInsightsName: $(appInsightsName)
+      acrName: $(acrName)
+      containerAppName: $(containerAppName)
+      managedIdentityName: $(managedIdentityName)
+      blobContainerName: $(blobContainerName)
+      aiSearchIndexName: $(aiSearchIndexName)
+      aiSearchDataSourceName: $(aiSearchDataSourceName)
+      aiSearchIndexerName: $(aiSearchIndexerName)
+
+  - template: templates/stages/stage-decommission-container-app.yml
+    parameters:
+      azureSubscription: $(azureSubscription)
+      resourceGroupName: $(sharedResourceGroupName)
+      containerAppName: $(containerAppName)
+      dependsOn:
+        - Validation
+
+  - template: templates/stages/stage-remove-ai-search.yml
+    parameters:
+      azureSubscription: $(azureSubscription)
+      resourceGroupName: $(sharedResourceGroupName)
+      aiSearchName: $(aiSearchName)
+      indexName: $(aiSearchIndexName)
+      dataSourceName: $(aiSearchDataSourceName)
+      indexerName: $(aiSearchIndexerName)
+      dependsOn:
+        - Validation
+        - DeleteContainerApp
+
+  - template: templates/stages/stage-delete-blob-container.yml
+    parameters:
+      azureSubscription: $(azureSubscription)
+      resourceGroupName: $(sharedResourceGroupName)
+      storageAccountName: $(storageAccountName)
+      blobContainerName: $(blobContainerName)
+      dependsOn:
+        - Validation
+        - DeleteContainerApp
+
+  - template: templates/stages/stage-remove-rbac.yml
+    parameters:
+      azureSubscription: $(azureSubscription)
+      resourceGroupName: $(sharedResourceGroupName)
+      managedIdentityName: $(managedIdentityName)
+      storageAccountName: $(storageAccountName)
+      aiSearchName: $(aiSearchName)
+      acrName: $(acrName)
+      dependsOn:
+        - Validation
+        - DeleteContainerApp
+
+  - template: templates/stages/stage-delete-msi.yml
+    parameters:
+      azureSubscription: $(azureSubscription)
+      resourceGroupName: $(sharedResourceGroupName)
+      managedIdentityName: $(managedIdentityName)
+      dependsOn:
+        - RemoveRBAC
+
+  - template: templates/stages/stage-decommission-summary.yml
+    parameters:
+      azureSubscription: $(azureSubscription)
+      resourceGroupName: $(sharedResourceGroupName)
+      aiSearchName: $(aiSearchName)
+      companionName: ${{ parameters.companionName }}
+      environment: ${{ parameters.environment }}
+      containerAppName: $(containerAppName)
+      managedIdentityName: $(managedIdentityName)
+      blobContainerName: $(blobContainerName)
+      aiSearchIndexName: $(aiSearchIndexName)
+      dataSourceName: $(aiSearchDataSourceName)
+      indexerName: $(aiSearchIndexerName)
+      dependsOn:
+        - DeleteAISearchAssets
+        - DeleteBlobContainer
+        - DeleteManagedIdentity

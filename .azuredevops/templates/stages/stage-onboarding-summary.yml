@@ -71,7 +71,7 @@ stages:
                 echo "=== Container App ==="
                 echo "Name  : ${{ parameters.containerAppName }}"
                 echo "State : $APP_STATE"
-                echo "Mode  : TimerTrigger only"
+                echo "Type  : TimerTrigger only"
                 echo ""
 
                 echo "=== Ressources créées ==="

@@ -61,6 +61,21 @@ parameters:
       - Standard
       - Premium
 
+  - name: allowSecurity
+    displayName: '🔐 Activer le durcissement réseau en fin de pipeline'
+    type: boolean
+    default: false
+
+  - name: privateEndpointSubnetName
+    displayName: '🧱 Subnet des Private Endpoints'
+    type: string
+    default: 'snet-private-endpoints'
+
+  - name: privateDnsResourceGroupName
+    displayName: '🧭 RG DNS privés (vide = RG partagé)'
+    type: string
+    default: ''
+
 # -----------------------------------------------------------------------------
 # Variables
 # -----------------------------------------------------------------------------
@@ -73,6 +88,7 @@ variables:
   logAnalyticsName: 'log-companion-shared-${{ parameters.environment }}'
   appInsightsName: 'appi-companion-shared-${{ parameters.environment }}'
   acrName: 'acrcompanion${{ parameters.environment }}'
+  privateEndpointVnetName: 'vnet-companion-shared-${{ parameters.environment }}'
   
   # Service Connection
   azureSubscription: 'SVC_GPTrusted_${{ upper(parameters.environment) }}'
@@ -113,6 +129,12 @@ stages:
               echo "AI Search : ${{ parameters.aiSearchSku }}"
               echo "Storage   : ${{ parameters.storageSku }}"
               echo "ACR       : ${{ parameters.acrSku }}"
+              echo ""
+              echo "=== Sécurité réseau ==="
+              echo "Sécurité activée            : ${{ parameters.allowSecurity }}"
+              echo "VNet Private Endpoints      : $(privateEndpointVnetName)"
+              echo "Subnet Private Endpoints    : ${{ parameters.privateEndpointSubnetName }}"
+              echo "RG DNS privés               : ${{ parameters.privateDnsResourceGroupName }}"
               echo ""
             displayName: '📋 Afficher les paramètres'
 
@@ -186,7 +208,39 @@ stages:
       dependsOn:
         - CreateResourceGroup
 
-  # Stage 8 : Résumé
+  # Stage 8 : Créer le réseau partagé (VNet + subnet Private Endpoints)
+  - template: templates/stages/stage-create-network.yml
+    parameters:
+      azureSubscription: $(azureSubscription)
+      resourceGroupName: $(resourceGroupName)
+      location: ${{ parameters.location }}
+      privateEndpointVnetName: $(privateEndpointVnetName)
+      privateEndpointSubnetName: ${{ parameters.privateEndpointSubnetName }}
+      environment: ${{ parameters.environment }}
+      dependsOn:
+        - CreateResourceGroup
+
+  # Stage 9 : Durcissement réseau optionnel
+  - ${{ if eq(parameters.allowSecurity, true) }}:
+    - template: templates/stages/stage-apply-network-security.yml
+      parameters:
+        azureSubscription: $(azureSubscription)
+        resourceGroupName: $(resourceGroupName)
+        location: ${{ parameters.location }}
+        environment: ${{ parameters.environment }}
+        storageAccountName: $(storageAccountName)
+        aiSearchName: $(aiSearchName)
+        acrName: $(acrName)
+        privateEndpointSubnetName: ${{ parameters.privateEndpointSubnetName }}
+        privateDnsResourceGroupName: ${{ parameters.privateDnsResourceGroupName }}
+        dependsOn:
+          - CreateNetwork
+          - CreateStorageAccount
+          - CreateAISearch
+          - CreateContainerAppsEnv
+          - CreateAzureContainerRegistry
+
+  # Stage 10 : Résumé (toujours dernier)
   - template: templates/stages/stage-infra-summary.yml
     parameters:
       azureSubscription: $(azureSubscription)
@@ -203,3 +257,5 @@ stages:
         - CreateAISearch
         - CreateContainerAppsEnv
         - CreateAzureContainerRegistry
+        - ${{ if eq(parameters.allowSecurity, true) }}:
+          - ApplyNetworkSecurity

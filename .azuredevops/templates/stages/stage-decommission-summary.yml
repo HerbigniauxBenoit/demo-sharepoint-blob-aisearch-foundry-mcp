@@ -1,0 +1,102 @@
+# =============================================================================
+# Stage Template : Resume de decommission
+# =============================================================================
+parameters:
+  - name: azureSubscription
+    type: string
+  - name: resourceGroupName
+    type: string
+  - name: aiSearchName
+    type: string
+  - name: companionName
+    type: string
+  - name: environment
+    type: string
+  - name: containerAppName
+    type: string
+  - name: managedIdentityName
+    type: string
+  - name: blobContainerName
+    type: string
+  - name: aiSearchIndexName
+    type: string
+  - name: dataSourceName
+    type: string
+  - name: indexerName
+    type: string
+  - name: dependsOn
+    type: object
+    default: []
+
+stages:
+  - stage: Summary
+    displayName: '7. Summary'
+    dependsOn: ${{ parameters.dependsOn }}
+    jobs:
+      - job: ShowSummary
+        displayName: 'Display decommission summary'
+        pool:
+          vmImage: 'ubuntu-latest'
+        steps:
+          - task: AzureCLI@2
+            displayName: 'Show final status'
+            inputs:
+              azureSubscription: ${{ parameters.azureSubscription }}
+              scriptType: 'bash'
+              scriptLocation: 'inlineScript'
+              inlineScript: |
+                set -euo pipefail
+
+                resource_state() {
+                  local label="$1"
+                  local command="$2"
+                  if eval "$command" >/dev/null 2>&1; then
+                    echo "- $label : still present"
+                  else
+                    echo "- $label : absent"
+                  fi
+                }
+
+                SEARCH_KEY=$(az search admin-key show \
+                  --service-name "${{ parameters.aiSearchName }}" \
+                  --resource-group "${{ parameters.resourceGroupName }}" \
+                  --query primaryKey -o tsv 2>/dev/null || true)
+                SEARCH_URL="https://${{ parameters.aiSearchName }}.search.windows.net"
+
+                echo "================================================"
+                echo "      DECOMMISSION COMPLETED                    "
+                echo "================================================"
+                echo "Companion   : ${{ parameters.companionName }}"
+                echo "Environment : ${{ parameters.environment }}"
+                echo "RG          : ${{ parameters.resourceGroupName }}"
+                echo ""
+                echo "Deletion targets:"
+                echo "- Container App : ${{ parameters.containerAppName }}"
+                echo "- Managed Id    : ${{ parameters.managedIdentityName }}"
+                echo "- Blob Container: ${{ parameters.blobContainerName }}"
+                echo "- AI Search idx : ${{ parameters.aiSearchIndexName }}"
+                echo "- AI Search ds  : ${{ parameters.dataSourceName }}"
+                echo "- AI Search idxr: ${{ parameters.indexerName }}"
+                echo ""
+
+                echo "Current state after pipeline:"
+                resource_state "Container App" "az containerapp show --name '${{ parameters.containerAppName }}' --resource-group '${{ parameters.resourceGroupName }}'"
+                resource_state "Managed Identity" "az identity show --name '${{ parameters.managedIdentityName }}' --resource-group '${{ parameters.resourceGroupName }}'"
+
+                if [ -n "$SEARCH_KEY" ]; then
+                  for target in \
+                    "indexers/${{ parameters.indexerName }}" \
+                    "indexes/${{ parameters.aiSearchIndexName }}" \
+                    "datasources/${{ parameters.dataSourceName }}"; do
+                    HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
+                      -X GET "$SEARCH_URL/$target?api-version=2024-07-01" \
+                      -H "api-key: $SEARCH_KEY")
+                    if [ "$HTTP_STATUS" = "200" ]; then
+                      echo "- AI Search $target : still present"
+                    else
+                      echo "- AI Search $target : absent"
+                    fi
+                  done
+                else
+                  echo "- AI Search status: unavailable (could not fetch admin key)"
+                fi

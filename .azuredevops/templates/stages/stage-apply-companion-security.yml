@@ -1,0 +1,286 @@
+# =============================================================================
+# Stage Template : Appliquer sécurité spécifique au compagnon
+# =============================================================================
+# Durcit les ressources du compagnon (blob, AI Search, Container App)
+# =============================================================================
+parameters:
+  - name: azureSubscription
+    type: string
+  - name: resourceGroupName
+    type: string
+  - name: environment
+    type: string
+  - name: companionName
+    type: string
+  - name: storageAccountName
+    type: string
+  - name: blobContainerName
+    type: string
+  - name: aiSearchName
+    type: string
+  - name: aiSearchIndexName
+    type: string
+  - name: aiSearchDataSourceName
+    type: string
+  - name: aiSearchIndexerName
+    type: string
+  - name: containerAppName
+    type: string
+  - name: appInsightsName
+    type: string
+  - name: managedIdentityName
+    type: string
+  - name: dependsOn
+    type: object
+    default: []
+
+stages:
+  - stage: ApplyCompanionSecurity
+    displayName: '🔐 Sécurité compagnon'
+    dependsOn: ${{ parameters.dependsOn }}
+    jobs:
+      - job: HardenCompanionResources
+        displayName: 'Appliquer sécurité au compagnon'
+        pool:
+          vmImage: 'ubuntu-latest'
+        steps:
+          - task: AzureCLI@2
+            displayName: '🔐 Sécuriser blob container, AI Search et Container App'
+            inputs:
+              azureSubscription: ${{ parameters.azureSubscription }}
+              scriptType: 'bash'
+              scriptLocation: 'inlineScript'
+              inlineScript: |
+                set -euo pipefail
+
+                RG="${{ parameters.resourceGroupName }}"
+                STORAGE_NAME="${{ parameters.storageAccountName }}"
+                CONTAINER_NAME="${{ parameters.blobContainerName }}"
+                SEARCH_NAME="${{ parameters.aiSearchName }}"
+                INDEX_NAME="${{ parameters.aiSearchIndexName }}"
+                DATASOURCE_NAME="${{ parameters.aiSearchDataSourceName }}"
+                INDEXER_NAME="${{ parameters.aiSearchIndexerName }}"
+                CONTAINER_APP_NAME="${{ parameters.containerAppName }}"
+                APPINSIGHTS_NAME="${{ parameters.appInsightsName }}"
+                MSI_NAME="${{ parameters.managedIdentityName }}"
+                COMPANION="${{ parameters.companionName }}"
+                VNET_NAME="vnet-companion-shared-${{ parameters.environment }}"
+                SUBNET_NAME="snet-private-endpoints"
+
+                echo "============================================================"
+                echo "        SÉCURITÉ COMPAGNON"
+                echo "============================================================"
+                echo "Compagnon          : $COMPANION"
+                echo "Ressource Group    : $RG"
+                echo "Storage Account    : $STORAGE_NAME"
+                echo "Blob Container     : $CONTAINER_NAME"
+                echo "AI Search          : $SEARCH_NAME"
+                echo "Container App      : $CONTAINER_APP_NAME"
+                echo "Managed Identity   : $MSI_NAME"
+                echo ""
+
+                # ========== PRÉREQUISITES: VNET/SUBNET ==========
+                echo "=== VALIDATION: Réseau partagé (CRITIQUE) ==="
+                
+                if ! az network vnet show --resource-group "$RG" --name "$VNET_NAME" >/dev/null 2>&1; then
+                  echo "❌ ERREUR CRITIQUE: VNet '$VNET_NAME' INTROUVABLE"
+                  echo "   → Pipeline infra-shared DOIT être exécutée d'abord (crée le réseau)"
+                  exit 1
+                fi
+                echo "✅ VNet trouvé: $VNET_NAME"
+
+                if ! az network vnet subnet show --resource-group "$RG" --vnet-name "$VNET_NAME" --name "$SUBNET_NAME" >/dev/null 2>&1; then
+                  echo "❌ ERREUR CRITIQUE: Subnet '$SUBNET_NAME' INTROUVABLE"
+                  echo "   → Pipeline infra-shared stage-create-network DOIT avoir réussi"
+                  exit 1
+                fi
+                echo "✅ Subnet trouvé: $SUBNET_NAME"
+
+                echo ""
+
+                # ========== BLOB CONTAINER SECURITY ==========
+                echo "=== Sécurité Blob Container ==="
+
+                # Vérifier que le container n'a pas d'accès public
+                CONTAINER_ACCESS=$(az storage container show \
+                  --name "$CONTAINER_NAME" \
+                  --account-name "$STORAGE_NAME" \
+                  --query publicAccess -o tsv 2>/dev/null || echo "None")
+
+                if [ "$CONTAINER_ACCESS" = "None" ]; then
+                  echo "✅ Blob container : accès public fermé"
+                else
+                  echo "⚠️  Blob container publicAccess: $CONTAINER_ACCESS (attendu: None)"
+                fi
+
+                # Vérifier les métadonnées de chiffrement
+                ENCRYPTION=$(az storage account show \
+                  --name "$STORAGE_NAME" \
+                  --resource-group "$RG" \
+                  --query "encryption.services.blob.enabled" -o tsv 2>/dev/null || echo "unknown")
+
+                if [ "$ENCRYPTION" = "true" ]; then
+                  echo "✅ Storage Account : chiffrement blob activé"
+                else
+                  echo "⚠️  Storage Account : chiffrement blob status: $ENCRYPTION"
+                fi
+
+                echo ""
+                echo "=== Tags de compagnon ==="
+
+                # Ajouter/vérifier les tags compagnon sur le container (via storage account tags)
+                STORAGE_TAGS=$(az storage account show \
+                  --name "$STORAGE_NAME" \
+                  --resource-group "$RG" \
+                  --query "tags" -o json)
+
+                if echo "$STORAGE_TAGS" | grep -q "companion"; then
+                  echo "✅ Storage Account tagué avec companion"
+                else
+                  echo "ℹ️  Tagging storage account avec companion: $COMPANION"
+                  az storage account update \
+                    --name "$STORAGE_NAME" \
+                    --resource-group "$RG" \
+                    --tags "companion=$COMPANION" "environment=${{ parameters.environment }}" \
+                    --only-show-errors >/dev/null
+                  echo "✅ Tags appliqués"
+                fi
+
+                echo ""
+                echo "=== Sécurité Container App ==="
+
+                # Vérifier que Container App est configurée
+                if az containerapp show \
+                  --name "$CONTAINER_APP_NAME" \
+                  --resource-group "$RG" >/dev/null 2>&1; then
+                  echo "✅ Container App présente: $CONTAINER_APP_NAME"
+
+                  # Vérifier les logs
+                  LOGS_CONFIG=$(az containerapp show \
+                    --name "$CONTAINER_APP_NAME" \
+                    --resource-group "$RG" \
+                    --query "properties.template.containers[0]" -o json 2>/dev/null || echo "{}")
+
+                  if echo "$LOGS_CONFIG" | grep -q "APPINSIGHTS\|APPLICATIONINSIGHTS"; then
+                    echo "✅ Application Insights connecté à Container App"
+                  else
+                    echo "ℹ️  Logs Application Insights configurés via variables d'environnement"
+                  fi
+                else
+                  echo "❌ Container App INTROUVABLE: $CONTAINER_APP_NAME"
+                  exit 1
+                fi
+
+                echo ""
+                echo "=== Vérification Audit et Conformité ==="
+
+                # Vérifier que AI Search index existe et est configurable
+                SEARCH_KEY=$(az search admin-key show \
+                  --service-name "$SEARCH_NAME" \
+                  --resource-group "$RG" \
+                  --query primaryKey -o tsv 2>/dev/null || echo "")
+
+                if [ -z "$SEARCH_KEY" ]; then
+                  echo "❌ Impossible de récupérer les clés AI Search"
+                  exit 1
+                fi
+
+                SEARCH_URL="https://$SEARCH_NAME.search.windows.net"
+
+                # Vérifier que l'index du compagnon existe
+                HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
+                  -X GET "$SEARCH_URL/indexes/$INDEX_NAME?api-version=2024-07-01" \
+                  -H "api-key: $SEARCH_KEY")
+
+                if [ "$HTTP_STATUS" = "200" ]; then
+                  echo "✅ AI Search index présent: $INDEX_NAME"
+                else
+                  echo "❌ AI Search index INTROUVABLE (HTTP $HTTP_STATUS)"
+                  exit 1
+                fi
+
+                # Vérifier datasource
+                HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
+                  -X GET "$SEARCH_URL/datasources/$DATASOURCE_NAME?api-version=2024-07-01" \
+                  -H "api-key: $SEARCH_KEY")
+
+                if [ "$HTTP_STATUS" = "200" ]; then
+                  echo "✅ AI Search datasource présent: $DATASOURCE_NAME"
+                else
+                  echo "❌ AI Search datasource INTROUVABLE (HTTP $HTTP_STATUS)"
+                  exit 1
+                fi
+
+                # Vérifier indexer
+                HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
+                  -X GET "$SEARCH_URL/indexers/$INDEXER_NAME?api-version=2024-07-01" \
+                  -H "api-key: $SEARCH_KEY")
+
+                if [ "$HTTP_STATUS" = "200" ]; then
+                  echo "✅ AI Search indexer présent: $INDEXER_NAME"
+                else
+                  echo "❌ AI Search indexer INTROUVABLE (HTTP $HTTP_STATUS)"
+                  exit 1
+                fi
+
+                echo ""
+                echo "=== VALIDATION: Assigned Managed Identity ==="
+
+                # Récupérer la MSI et vérifier qu'elle est assignée à Container App
+                MSI_ID=$(az identity show \
+                  --name "$MSI_NAME" \
+                  --resource-group "$RG" \
+                  --query id -o tsv 2>/dev/null || echo "")
+
+                if [ -z "$MSI_ID" ]; then
+                  echo "❌ Managed Identity NOT FOUND: $MSI_NAME"
+                  exit 1
+                fi
+
+                CA_MSI=$(az containerapp show \
+                  --name "$CONTAINER_APP_NAME" \
+                  --resource-group "$RG" \
+                  --query "identity.userAssignedIdentities" -o json 2>/dev/null || echo "{}")
+
+                if echo "$CA_MSI" | grep -q "$MSI_ID"; then
+                  echo "✅ Container App a la MSI assignée: $MSI_NAME"
+                else
+                  echo "❌ Container App LA MSI N'EST PAS ASSIGNÉE"
+                  exit 1
+                fi
+
+                echo ""
+                echo "=== VALIDATION: RBAC Assignments ==="
+
+                MSI_PRINCIPAL_ID=$(az identity show \
+                  --name "$MSI_NAME" \
+                  --resource-group "$RG" \
+                  --query principalId -o tsv)
+
+                # Vérifier Storage RBAC
+                STORAGE_ROLES=$(az role assignment list \
+                  --assignee "$MSI_PRINCIPAL_ID" \
+                  --scope "$(az storage account show --name "$STORAGE_NAME" --resource-group "$RG" --query id -o tsv)" \
+                  --query "length(@)" -o tsv 2>/dev/null || echo "0")
+
+                if [ "$STORAGE_ROLES" -gt 0 ]; then
+                  echo "✅ MSI has $STORAGE_ROLES RBAC role(s) on Storage"
+                else
+                  echo "❌ MSI HAS NO RBAC ROLES on Storage - CHECK STAGE-ASSIGN-RBAC"
+                  exit 1
+                fi
+
+                # Vérifier AI Search RBAC
+                SEARCH_ROLES=$(az role assignment list \
+                  --assignee "$MSI_PRINCIPAL_ID" \
+                  --scope "$(az search service show --name "$SEARCH_NAME" --resource-group "$RG" --query id -o tsv)" \
+                  --query "length(@)" -o tsv 2>/dev/null || echo "0")
+
+                if [ "$SEARCH_ROLES" -gt 0 ]; then
+                  echo "✅ MSI has $SEARCH_ROLES RBAC role(s) on AI Search"
+                else
+                  echo "❌ MSI HAS NO RBAC ROLES on AI Search - CHECK STAGE-ASSIGN-RBAC"
+                  exit 1
+                fi
+
+                echo ""

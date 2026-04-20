@@ -1,0 +1,38 @@
+# =============================================================================
+# Stage Template : Supprimer assets AI Search
+# =============================================================================
+parameters:
+  - name: azureSubscription
+    type: string
+  - name: resourceGroupName
+    type: string
+  - name: aiSearchName
+    type: string
+  - name: indexName
+    type: string
+  - name: dataSourceName
+    type: string
+  - name: indexerName
+    type: string
+  - name: dependsOn
+    type: object
+    default: []
+
+stages:
+  - stage: DeleteAISearchAssets
+    displayName: '3. Delete AI Search assets'
+    dependsOn: ${{ parameters.dependsOn }}
+    jobs:
+      - job: DeleteAISearchAssetsJob
+        displayName: 'Delete indexer, datasource and index'
+        pool:
+          vmImage: 'ubuntu-latest'
+        steps:
+          - template: ../steps/step-delete-ai-search-assets.yml
+            parameters:
+              azureSubscription: ${{ parameters.azureSubscription }}
+              resourceGroupName: ${{ parameters.resourceGroupName }}
+              aiSearchName: ${{ parameters.aiSearchName }}
+              indexName: ${{ parameters.indexName }}
+              dataSourceName: ${{ parameters.dataSourceName }}
+              indexerName: ${{ parameters.indexerName }}

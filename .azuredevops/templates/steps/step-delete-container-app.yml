@@ -1,0 +1,34 @@
+# =============================================================================
+# Step Template : Supprimer Container App
+# =============================================================================
+parameters:
+  - name: azureSubscription
+    type: string
+  - name: resourceGroupName
+    type: string
+  - name: containerAppName
+    type: string
+
+steps:
+  - task: AzureCLI@2
+    displayName: 'Delete Container App'
+    inputs:
+      azureSubscription: ${{ parameters.azureSubscription }}
+      scriptType: 'bash'
+      scriptLocation: 'inlineScript'
+      inlineScript: |
+        set -euo pipefail
+
+        if az containerapp show \
+          --name "${{ parameters.containerAppName }}" \
+          --resource-group "${{ parameters.resourceGroupName }}" >/dev/null 2>&1; then
+          echo "Deleting Container App '${{ parameters.containerAppName }}'..."
+          az containerapp delete \
+            --name "${{ parameters.containerAppName }}" \
+            --resource-group "${{ parameters.resourceGroupName }}" \
+            --yes \
+            --only-show-errors
+          echo "Container App deleted."
+        else
+          echo "Container App already absent."
+        fi
