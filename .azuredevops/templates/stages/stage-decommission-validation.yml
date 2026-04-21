@@ -8,8 +8,6 @@ parameters:
     type: string
   - name: companionName
     type: string
-  - name: confirmDeletion
-    type: boolean
   - name: sharedResourceGroupName
     type: string
   - name: storageAccountName
@@ -72,11 +70,6 @@ stages:
 
               if [[ ! "${{ parameters.companionName }}" =~ ^[a-z0-9]([a-z0-9-]*[a-z0-9])?$ ]]; then
                 echo "ERROR: invalid companionName format"
-                exit 1
-              fi
-
-              if [ "${{ parameters.confirmDeletion }}" != "true" ]; then
-                echo "ERROR: confirmDeletion must be true to run decommission"
                 exit 1
               fi
 

@@ -22,11 +22,6 @@ parameters:
     displayName: 'Companion name (ex: hr-assistant)'
     type: string
 
-  - name: confirmDeletion
-    displayName: 'I confirm this decommission operation'
-    type: boolean
-    default: false
-
 variables:
   # Shared resources
   sharedResourceGroupName: 'rg-companion-${{ parameters.environment }}'
@@ -55,7 +50,6 @@ stages:
       azureSubscription: $(azureSubscription)
       environment: ${{ parameters.environment }}
       companionName: ${{ parameters.companionName }}
-      confirmDeletion: ${{ parameters.confirmDeletion }}
       sharedResourceGroupName: $(sharedResourceGroupName)
       storageAccountName: $(storageAccountName)
       aiSearchName: $(aiSearchName)
