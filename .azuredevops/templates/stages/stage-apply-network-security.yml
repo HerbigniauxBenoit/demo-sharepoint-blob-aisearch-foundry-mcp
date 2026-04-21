@@ -16,11 +16,6 @@ parameters:
     type: string
   - name: acrName
     type: string
-  - name: privateEndpointSubnetName
-    type: string
-  - name: privateDnsResourceGroupName
-    type: string
-    default: ''
   - name: dependsOn
     type: object
     default: []
@@ -33,7 +28,7 @@ stages:
       - job: HardenSharedInfra
         displayName: 'Appliquer la sécurité réseau partagée'
         pool:
-          vmImage: 'ubuntu-latest'
+          name: gptrusted-${{ parameters.environment }}
         steps:
           - task: AzureCLI@2
             displayName: '🔐 Private Endpoints + fermeture accès public (sauf monitoring et Container Apps)'
@@ -46,22 +41,40 @@ stages:
 
                 RG="${{ parameters.resourceGroupName }}"
                 LOC="${{ parameters.location }}"
-                VNET_NAME="vnet-companion-shared-${{ parameters.environment }}"
-                SUBNET_NAME="${{ parameters.privateEndpointSubnetName }}"
+                SUBNET_NAME="snet-companion-private-endpoints"
+                case "${{ parameters.environment }}" in
+                  dev)  VNET_NAME="vnet-gptrusted-dev"  ;;
+                  nprd) VNET_NAME="vnet-gptrusted-nprd" ;;
+                  prod) VNET_NAME="vnet-gptrusted-prod" ;;
+                  *)    VNET_NAME="vnet-gptrusted-${{ parameters.environment }}" ;;
+                esac
+
+                VNET_COUNT=$(az network vnet list \
+                  --query "length([?name=='$VNET_NAME'])" -o tsv)
+
+                if [ "$VNET_COUNT" -eq 0 ]; then
+                  echo "❌ VNet '$VNET_NAME' introuvable dans l'abonnement courant."
+                  exit 1
+                fi
+
+                if [ "$VNET_COUNT" -gt 1 ]; then
+                  echo "❌ Plusieurs VNets nommés '$VNET_NAME' trouvés."
+                  echo "   Corrigez les doublons pour permettre une sélection non ambiguë."
+                  exit 1
+                fi
+
+                VNET_RG=$(az network vnet list \
+                  --query "[?name=='$VNET_NAME']|[0].resourceGroup" -o tsv)
                 STORAGE_NAME="${{ parameters.storageAccountName }}"
                 SEARCH_NAME="${{ parameters.aiSearchName }}"
                 ACR_NAME="${{ parameters.acrName }}"
-                DNS_RG="${{ parameters.privateDnsResourceGroupName }}"
-
-                if [ -z "$DNS_RG" ]; then
-                  DNS_RG="$RG"
-                fi
+                DNS_RG="$RG"
 
                 echo "============================================================"
                 echo "        DURCISSEMENT RÉSEAU"
                 echo "============================================================"
                 echo "Resource Group       : $RG"
-                echo "VNet                 : $VNET_NAME"
+                echo "VNet                 : $VNET_NAME (RG: $VNET_RG)"
                 echo "Subnet PE            : $SUBNET_NAME"
                 echo "RG DNS privés        : $DNS_RG"
                 echo ""
@@ -110,27 +123,27 @@ stages:
                 }
 
                 ensure_vnet() {
-                  if az network vnet show --resource-group "$RG" --name "$VNET_NAME" >/dev/null 2>&1; then
-                    echo "VNet présent: $VNET_NAME"
+                  if az network vnet show --resource-group "$VNET_RG" --name "$VNET_NAME" >/dev/null 2>&1; then
+                    echo "VNet présent: $VNET_NAME (RG: $VNET_RG)"
                   else
-                    echo "❌ VNet '$VNET_NAME' introuvable. Le stage CreateNetwork doit être exécuté avant ce stage."
+                    echo "❌ VNet '$VNET_NAME' introuvable dans le RG '$VNET_RG'."
                     exit 1
                   fi
                 }
 
                 ensure_subnet() {
                   if az network vnet subnet show \
-                    --resource-group "$RG" \
+                    --resource-group "$VNET_RG" \
                     --vnet-name "$VNET_NAME" \
                     --name "$SUBNET_NAME" >/dev/null 2>&1; then
                     echo "Subnet présent: $SUBNET_NAME"
                   else
-                    echo "❌ Subnet '$SUBNET_NAME' introuvable. Le stage CreateNetwork doit être exécuté avant ce stage."
+                    echo "❌ Subnet '$SUBNET_NAME' introuvable dans le VNet '$VNET_NAME'."
                     exit 1
                   fi
 
                   az network vnet subnet update \
-                    --resource-group "$RG" \
+                    --resource-group "$VNET_RG" \
                     --vnet-name "$VNET_NAME" \
                     --name "$SUBNET_NAME" \
                     --disable-private-endpoint-network-policies true \
@@ -165,7 +178,7 @@ stages:
                       --resource-group "$DNS_RG" \
                       --zone-name "$zone" \
                       --name "$link_name" \
-                      --virtual-network "$VNET_NAME" \
+                      --virtual-network "/subscriptions/$(az account show --query id -o tsv)/resourceGroups/$VNET_RG/providers/Microsoft.Network/virtualNetworks/$VNET_NAME" \
                       --registration-enabled false \
                       --only-show-errors >/dev/null
                   fi
@@ -186,6 +199,7 @@ stages:
                       --name "$pe_name" \
                       --location "$LOC" \
                       --vnet-name "$VNET_NAME" \
+                      --vnet-resource-group "$VNET_RG" \
                       --subnet "$SUBNET_NAME" \
                       --private-connection-resource-id "$target_id" \
                       --group-id "$group_id" \

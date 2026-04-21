@@ -66,16 +66,6 @@ parameters:
     type: boolean
     default: false
 
-  - name: privateEndpointSubnetName
-    displayName: '🧱 Subnet des Private Endpoints'
-    type: string
-    default: 'snet-private-endpoints'
-
-  - name: privateDnsResourceGroupName
-    displayName: '🧭 RG DNS privés (vide = RG partagé)'
-    type: string
-    default: ''
-
 # -----------------------------------------------------------------------------
 # Variables
 # -----------------------------------------------------------------------------
@@ -88,7 +78,6 @@ variables:
   logAnalyticsName: 'log-companion-shared-${{ parameters.environment }}'
   appInsightsName: 'appi-companion-shared-${{ parameters.environment }}'
   acrName: 'acrcompanion${{ parameters.environment }}'
-  privateEndpointVnetName: 'vnet-companion-shared-${{ parameters.environment }}'
   
   # Service Connection
   azureSubscription: 'SVC_GPTrusted_${{ upper(parameters.environment) }}'
@@ -132,9 +121,9 @@ stages:
               echo ""
               echo "=== Sécurité réseau ==="
               echo "Sécurité activée            : ${{ parameters.allowSecurity }}"
-              echo "VNet Private Endpoints      : $(privateEndpointVnetName)"
-              echo "Subnet Private Endpoints    : ${{ parameters.privateEndpointSubnetName }}"
-              echo "RG DNS privés               : ${{ parameters.privateDnsResourceGroupName }}"
+              echo "VNet Private Endpoints      : vnet-gptrusted-${{ parameters.environment }} (existant)"
+              echo "Subnet Private Endpoints    : snet-companion-private-endpoints"
+              echo "RG DNS privés               : $(resourceGroupName)"
               echo ""
             displayName: '📋 Afficher les paramètres'
 
@@ -214,8 +203,6 @@ stages:
       azureSubscription: $(azureSubscription)
       resourceGroupName: $(resourceGroupName)
       location: ${{ parameters.location }}
-      privateEndpointVnetName: $(privateEndpointVnetName)
-      privateEndpointSubnetName: ${{ parameters.privateEndpointSubnetName }}
       environment: ${{ parameters.environment }}
       dependsOn:
         - CreateResourceGroup
@@ -231,8 +218,6 @@ stages:
         storageAccountName: $(storageAccountName)
         aiSearchName: $(aiSearchName)
         acrName: $(acrName)
-        privateEndpointSubnetName: ${{ parameters.privateEndpointSubnetName }}
-        privateDnsResourceGroupName: ${{ parameters.privateDnsResourceGroupName }}
         dependsOn:
           - CreateNetwork
           - CreateStorageAccount

@@ -1,5 +1,5 @@
 # =============================================================================
-# Stage Template : Créer le réseau partagé (VNet + subnet Private Endpoints)
+# Stage Template : Préparer le réseau (VNet existant + subnet Private Endpoints)
 # =============================================================================
 parameters:
   - name: azureSubscription
@@ -7,10 +7,6 @@ parameters:
   - name: resourceGroupName
     type: string
   - name: location
-    type: string
-  - name: privateEndpointVnetName
-    type: string
-  - name: privateEndpointSubnetName
     type: string
   - name: environment
     type: string
@@ -24,12 +20,12 @@ stages:
     dependsOn: ${{ parameters.dependsOn }}
     jobs:
       - job: CreateSharedNetwork
-        displayName: 'Créer VNet et subnet Private Endpoints'
+        displayName: 'Créer subnet Private Endpoints sur VNet existant'
         pool:
-          vmImage: 'ubuntu-latest'
+          name: gptrusted-${{ parameters.environment }}
         steps:
           - task: AzureCLI@2
-            displayName: '🌐 az network vnet/subnet create'
+            displayName: '🌐 az network vnet/subnet'
             inputs:
               azureSubscription: ${{ parameters.azureSubscription }}
               scriptType: 'bash'
@@ -38,52 +34,76 @@ stages:
                 set -euo pipefail
 
                 RG="${{ parameters.resourceGroupName }}"
-                LOC="${{ parameters.location }}"
-                VNET_NAME="${{ parameters.privateEndpointVnetName }}"
-                SUBNET_NAME="${{ parameters.privateEndpointSubnetName }}"
+                SUBNET_NAME="snet-companion-private-endpoints"
+                SUBNET_CIDR="140.26.140.64/26"
 
-                if az network vnet show --resource-group "$RG" --name "$VNET_NAME" >/dev/null 2>&1; then
-                  echo "ℹ️  VNet '$VNET_NAME' déjà présent"
+                case "${{ parameters.environment }}" in
+                  dev)  VNET_NAME="vnet-gptrusted-dev"  ;;
+                  nprd) VNET_NAME="vnet-gptrusted-nprd" ;;
+                  prod) VNET_NAME="vnet-gptrusted-prod" ;;
+                  *)    VNET_NAME="vnet-gptrusted-${{ parameters.environment }}" ;;
+                esac
 
-                  az network vnet update \
-                    --resource-group "$RG" \
-                    --name "$VNET_NAME" \
-                    --tags environment="${{ parameters.environment }}" \
-                    --only-show-errors >/dev/null
-                else
-                  echo "Création du VNet '$VNET_NAME'"
+                VNET_COUNT=$(az network vnet list \
+                  --query "length([?name=='$VNET_NAME'])" -o tsv)
 
-                  az network vnet create \
-                    --resource-group "$RG" \
-                    --name "$VNET_NAME" \
-                    --location "$LOC" \
-                    --address-prefixes "10.90.0.0/16" \
-                    --tags environment="${{ parameters.environment }}" \
-                    --only-show-errors >/dev/null
+                if [ "$VNET_COUNT" -eq 0 ]; then
+                  echo "❌ VNet '$VNET_NAME' introuvable dans l'abonnement courant."
+                  exit 1
                 fi
 
+                if [ "$VNET_COUNT" -gt 1 ]; then
+                  echo "❌ Plusieurs VNets nommés '$VNET_NAME' trouvés."
+                  echo "   Corrigez les doublons pour permettre une sélection non ambiguë."
+                  exit 1
+                fi
+
+                VNET_RG=$(az network vnet list \
+                  --query "[?name=='$VNET_NAME']|[0].resourceGroup" -o tsv)
+
+                echo "✅ VNet existant trouvé: $VNET_NAME (RG: $VNET_RG)"
+
                 if az network vnet subnet show \
-                  --resource-group "$RG" \
+                  --resource-group "$VNET_RG" \
                   --vnet-name "$VNET_NAME" \
                   --name "$SUBNET_NAME" >/dev/null 2>&1; then
                   echo "ℹ️  Subnet '$SUBNET_NAME' déjà présent"
-                else
-                  echo "Création du subnet '$SUBNET_NAME'"
 
-                  az network vnet subnet create \
-                    --resource-group "$RG" \
+                  CURRENT_SUBNET_CIDR=$(az network vnet subnet show \
+                    --resource-group "$VNET_RG" \
                     --vnet-name "$VNET_NAME" \
                     --name "$SUBNET_NAME" \
-                    --address-prefixes "10.90.10.0/24" \
+                    --query "addressPrefix" -o tsv)
+
+                  if [ -z "$CURRENT_SUBNET_CIDR" ] || [ "$CURRENT_SUBNET_CIDR" = "null" ]; then
+                    CURRENT_SUBNET_CIDR=$(az network vnet subnet show \
+                      --resource-group "$VNET_RG" \
+                      --vnet-name "$VNET_NAME" \
+                      --name "$SUBNET_NAME" \
+                      --query "addressPrefixes[0]" -o tsv)
+                  fi
+
+                  if [ "$CURRENT_SUBNET_CIDR" != "$SUBNET_CIDR" ]; then
+                    echo "❌ Le subnet '$SUBNET_NAME' existe avec la plage '$CURRENT_SUBNET_CIDR' (attendu: '$SUBNET_CIDR')."
+                    exit 1
+                  fi
+                else
+                  echo "Création du subnet '$SUBNET_NAME' ($SUBNET_CIDR)"
+
+                  az network vnet subnet create \
+                    --resource-group "$VNET_RG" \
+                    --vnet-name "$VNET_NAME" \
+                    --name "$SUBNET_NAME" \
+                    --address-prefixes "$SUBNET_CIDR" \
                     --disable-private-endpoint-network-policies true \
                     --only-show-errors >/dev/null
                 fi
 
                 az network vnet subnet update \
-                  --resource-group "$RG" \
+                  --resource-group "$VNET_RG" \
                   --vnet-name "$VNET_NAME" \
                   --name "$SUBNET_NAME" \
                   --disable-private-endpoint-network-policies true \
                   --only-show-errors >/dev/null
 
-                echo "✅ Réseau partagé prêt: $VNET_NAME / $SUBNET_NAME"
+                echo "✅ Réseau prêt: VNet existant '$VNET_NAME' / Subnet '$SUBNET_NAME' ($SUBNET_CIDR)"

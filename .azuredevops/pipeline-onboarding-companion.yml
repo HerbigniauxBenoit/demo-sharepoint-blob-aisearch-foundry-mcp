@@ -83,8 +83,7 @@ variables:
   imageName: 'sharepoint-sync'
 
   # Réseau
-  privateEndpointVnetName: 'vnet-companion-shared-${{ parameters.environment }}'
-  privateEndpointSubnetName: 'snet-private-endpoints'
+  privateEndpointSubnetName: 'snet-companion-private-endpoints'
 
   # Service Connection
   azureSubscription: 'SVC_GPTrusted_${{ upper(parameters.environment) }}'

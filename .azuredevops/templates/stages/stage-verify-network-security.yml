@@ -16,10 +16,6 @@ parameters:
     type: string
   - name: acrName
     type: string
-  - name: privateEndpointVnetName
-    type: string
-  - name: privateEndpointSubnetName
-    type: string
   - name: dependsOn
     type: object
     default: []
@@ -45,8 +41,23 @@ stages:
 
                 RG="${{ parameters.resourceGroupName }}"
                 LOC="${{ parameters.environment }}"
-                VNET_NAME="${{ parameters.privateEndpointVnetName }}"
-                SUBNET_NAME="${{ parameters.privateEndpointSubnetName }}"
+                SUBNET_NAME="snet-companion-private-endpoints"
+                case "${{ parameters.environment }}" in
+                  dev)  VNET_NAME="vnet-gptrusted-dev"  ;;
+                  nprd) VNET_NAME="vnet-gptrusted-nprd" ;;
+                  prod) VNET_NAME="vnet-gptrusted-prod" ;;
+                  *)    VNET_NAME="vnet-gptrusted-${{ parameters.environment }}" ;;
+                esac
+
+                VNET_COUNT=$(az network vnet list \
+                  --query "length([?name=='$VNET_NAME'])" -o tsv)
+
+                if [ "$VNET_COUNT" -eq 1 ]; then
+                  VNET_RG=$(az network vnet list \
+                    --query "[?name=='$VNET_NAME']|[0].resourceGroup" -o tsv)
+                else
+                  VNET_RG="$RG"
+                fi
                 STORAGE_NAME="${{ parameters.storageAccountName }}"
                 SEARCH_NAME="${{ parameters.aiSearchName }}"
                 ACR_NAME="${{ parameters.acrName }}"
@@ -55,7 +66,7 @@ stages:
                 echo "        VÉRIFICATION DURCISSEMENT RÉSEAU PARTAGÉ"
                 echo "============================================================"
                 echo "Ressource Group  : $RG"
-                echo "VNet             : $VNET_NAME"
+                echo "VNet             : $VNET_NAME (RG: $VNET_RG)"
                 echo "Subnet PE        : $SUBNET_NAME"
                 echo "Storage Account  : $STORAGE_NAME"
                 echo "AI Search        : $SEARCH_NAME"
@@ -66,7 +77,7 @@ stages:
 
                 # Vérifier le VNet
                 echo "=== Vérification Réseau ==="
-                if az network vnet show --resource-group "$RG" --name "$VNET_NAME" >/dev/null 2>&1; then
+                if az network vnet show --resource-group "$VNET_RG" --name "$VNET_NAME" >/dev/null 2>&1; then
                   echo "✅ VNet présent: $VNET_NAME"
                 else
                   echo "❌ VNet ABSENT: $VNET_NAME"
@@ -75,7 +86,7 @@ stages:
 
                 # Vérifier le subnet
                 if az network vnet subnet show \
-                  --resource-group "$RG" \
+                  --resource-group "$VNET_RG" \
                   --vnet-name "$VNET_NAME" \
                   --name "$SUBNET_NAME" >/dev/null 2>&1; then
                   echo "✅ Subnet présent: $SUBNET_NAME"

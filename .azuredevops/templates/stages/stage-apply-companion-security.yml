@@ -64,8 +64,30 @@ stages:
                 APPINSIGHTS_NAME="${{ parameters.appInsightsName }}"
                 MSI_NAME="${{ parameters.managedIdentityName }}"
                 COMPANION="${{ parameters.companionName }}"
-                VNET_NAME="vnet-companion-shared-${{ parameters.environment }}"
-                SUBNET_NAME="snet-private-endpoints"
+                SUBNET_NAME="snet-companion-private-endpoints"
+
+                case "${{ parameters.environment }}" in
+                  dev)  VNET_NAME="vnet-gptrusted-dev"  ;;
+                  nprd) VNET_NAME="vnet-gptrusted-nprd" ;;
+                  prod) VNET_NAME="vnet-gptrusted-prod" ;;
+                  *)    VNET_NAME="vnet-gptrusted-${{ parameters.environment }}" ;;
+                esac
+
+                VNET_COUNT=$(az network vnet list \
+                  --query "length([?name=='$VNET_NAME'])" -o tsv)
+
+                if [ "$VNET_COUNT" -eq 0 ]; then
+                  echo "❌ ERREUR CRITIQUE: VNet '$VNET_NAME' introuvable dans l'abonnement courant"
+                  exit 1
+                fi
+
+                if [ "$VNET_COUNT" -gt 1 ]; then
+                  echo "❌ ERREUR CRITIQUE: Plusieurs VNets nommés '$VNET_NAME' trouvés"
+                  exit 1
+                fi
+
+                VNET_RG=$(az network vnet list \
+                  --query "[?name=='$VNET_NAME']|[0].resourceGroup" -o tsv)
 
                 echo "============================================================"
                 echo "        SÉCURITÉ COMPAGNON"
@@ -82,14 +104,14 @@ stages:
                 # ========== PRÉREQUISITES: VNET/SUBNET ==========
                 echo "=== VALIDATION: Réseau partagé (CRITIQUE) ==="
                 
-                if ! az network vnet show --resource-group "$RG" --name "$VNET_NAME" >/dev/null 2>&1; then
+                if ! az network vnet show --resource-group "$VNET_RG" --name "$VNET_NAME" >/dev/null 2>&1; then
                   echo "❌ ERREUR CRITIQUE: VNet '$VNET_NAME' INTROUVABLE"
                   echo "   → Pipeline infra-shared DOIT être exécutée d'abord (crée le réseau)"
                   exit 1
                 fi
-                echo "✅ VNet trouvé: $VNET_NAME"
+                echo "✅ VNet trouvé: $VNET_NAME (RG: $VNET_RG)"
 
-                if ! az network vnet subnet show --resource-group "$RG" --vnet-name "$VNET_NAME" --name "$SUBNET_NAME" >/dev/null 2>&1; then
+                if ! az network vnet subnet show --resource-group "$VNET_RG" --vnet-name "$VNET_NAME" --name "$SUBNET_NAME" >/dev/null 2>&1; then
                   echo "❌ ERREUR CRITIQUE: Subnet '$SUBNET_NAME' INTROUVABLE"
                   echo "   → Pipeline infra-shared stage-create-network DOIT avoir réussi"
                   exit 1
