@@ -42,6 +42,7 @@ stages:
                 RG="${{ parameters.resourceGroupName }}"
                 LOC="${{ parameters.location }}"
                 SUBNET_NAME="snet-companion-private-endpoints"
+
                 case "${{ parameters.environment }}" in
                   dev)  VNET_NAME="vnet-gptrusted-dev"  ;;
                   nprd) VNET_NAME="vnet-gptrusted-nprd" ;;
@@ -65,20 +66,31 @@ stages:
 
                 VNET_RG=$(az network vnet list \
                   --query "[?name=='$VNET_NAME']|[0].resourceGroup" -o tsv)
+
+                SUBSCRIPTION_ID=$(az account show --query id -o tsv)
+
                 STORAGE_NAME="${{ parameters.storageAccountName }}"
                 SEARCH_NAME="${{ parameters.aiSearchName }}"
                 ACR_NAME="${{ parameters.acrName }}"
                 DNS_RG="$RG"
 
+                # IDs complets pour les opérations cross-RG
+                SUBNET_ID="/subscriptions/$SUBSCRIPTION_ID/resourceGroups/$VNET_RG/providers/Microsoft.Network/virtualNetworks/$VNET_NAME/subnets/$SUBNET_NAME"
+                VNET_ID="/subscriptions/$SUBSCRIPTION_ID/resourceGroups/$VNET_RG/providers/Microsoft.Network/virtualNetworks/$VNET_NAME"
+
                 echo "============================================================"
                 echo "        DURCISSEMENT RÉSEAU"
                 echo "============================================================"
                 echo "Resource Group       : $RG"
+                echo "Subscription         : $SUBSCRIPTION_ID"
                 echo "VNet                 : $VNET_NAME (RG: $VNET_RG)"
                 echo "Subnet PE            : $SUBNET_NAME"
                 echo "RG DNS privés        : $DNS_RG"
                 echo ""
 
+                # ----------------------------------------------------------------
+                # Récupération des IDs des ressources
+                # ----------------------------------------------------------------
                 STORAGE_ID=$(az storage account show \
                   --name "$STORAGE_NAME" \
                   --resource-group "$RG" \
@@ -99,16 +111,20 @@ stages:
                   --resource-group "$RG" \
                   --query sku.name -o tsv)
 
+                # ----------------------------------------------------------------
+                # Audit exposition réseau
+                # ----------------------------------------------------------------
                 print_audit() {
                   STORAGE_PNA=$(az storage account show \
                     --name "$STORAGE_NAME" \
                     --resource-group "$RG" \
-                    --query publicNetworkAccess -o tsv || echo "unknown")
+                    --query "publicNetworkAccess || networkRuleSet.defaultAction" \
+                    -o tsv 2>/dev/null || echo "unknown")
 
                   SEARCH_PNA=$(az search service show \
                     --name "$SEARCH_NAME" \
                     --resource-group "$RG" \
-                    --query publicNetworkAccess -o tsv || echo "unknown")
+                    --query publicNetworkAccess -o tsv 2>/dev/null || echo "unknown")
 
                   ACR_PUBLIC=$(az acr show \
                     --name "$ACR_NAME" \
@@ -116,27 +132,35 @@ stages:
                     --query publicNetworkAccess -o tsv 2>/dev/null || echo "unknown")
 
                   echo "=== Audit exposition réseau ==="
-                  echo "Storage publicNetworkAccess : $STORAGE_PNA"
+                  echo "Storage publicNetworkAccess : ${STORAGE_PNA:-non défini}"
                   echo "AI Search publicNetworkAccess: $SEARCH_PNA"
                   echo "ACR publicNetworkAccess     : $ACR_PUBLIC"
                   echo ""
                 }
 
+                # ----------------------------------------------------------------
+                # Vérification VNet
+                # ----------------------------------------------------------------
                 ensure_vnet() {
-                  if az network vnet show --resource-group "$VNET_RG" --name "$VNET_NAME" >/dev/null 2>&1; then
-                    echo "VNet présent: $VNET_NAME (RG: $VNET_RG)"
+                  if az network vnet show \
+                    --resource-group "$VNET_RG" \
+                    --name "$VNET_NAME" >/dev/null 2>&1; then
+                    echo "✅ VNet présent: $VNET_NAME (RG: $VNET_RG)"
                   else
                     echo "❌ VNet '$VNET_NAME' introuvable dans le RG '$VNET_RG'."
                     exit 1
                   fi
                 }
 
+                # ----------------------------------------------------------------
+                # Vérification Subnet + activation private endpoint policies
+                # ----------------------------------------------------------------
                 ensure_subnet() {
                   if az network vnet subnet show \
                     --resource-group "$VNET_RG" \
                     --vnet-name "$VNET_NAME" \
                     --name "$SUBNET_NAME" >/dev/null 2>&1; then
-                    echo "Subnet présent: $SUBNET_NAME"
+                    echo "✅ Subnet présent: $SUBNET_NAME"
                   else
                     echo "❌ Subnet '$SUBNET_NAME' introuvable dans le VNet '$VNET_NAME'."
                     exit 1
@@ -150,10 +174,15 @@ stages:
                     --only-show-errors >/dev/null
                 }
 
+                # ----------------------------------------------------------------
+                # Zone DNS privée (idempotent)
+                # ----------------------------------------------------------------
                 ensure_private_dns_zone() {
                   local zone="$1"
-                  if az network private-dns zone show --resource-group "$DNS_RG" --name "$zone" >/dev/null 2>&1; then
-                    echo "Zone DNS privée déjà présente: $zone"
+                  if az network private-dns zone show \
+                    --resource-group "$DNS_RG" \
+                    --name "$zone" >/dev/null 2>&1; then
+                    echo "⏭️  Zone DNS privée déjà présente: $zone"
                   else
                     echo "Création zone DNS privée: $zone"
                     az network private-dns zone create \
@@ -163,44 +192,73 @@ stages:
                   fi
                 }
 
+                # ----------------------------------------------------------------
+                # Lien VNet ↔ Zone DNS (idempotent)
+                # FIX: on cherche dans TOUS les RGs de l'abonnement qui hébergent
+                #      une zone du même nom, car le lien peut exister dans un RG
+                #      différent de $DNS_RG (ex: rg-gptrusted-dev).
+                #      Sans ce fix, on ne détectait pas le lien existant et Azure
+                #      retournait "overlapping namespaces" à la recréation.
+                # ----------------------------------------------------------------
                 ensure_private_dns_link() {
                   local zone="$1"
                   local link_name="link-${zone//./-}"
 
-                  if az network private-dns link vnet show \
-                    --resource-group "$DNS_RG" \
-                    --zone-name "$zone" \
-                    --name "$link_name" >/dev/null 2>&1; then
-                    echo "Lien DNS déjà présent: $link_name"
+                  # Récupérer tous les RGs qui hébergent une zone du même nom
+                  ALL_ZONE_RGS=$(az network private-dns zone list \
+                    --query "[?name=='$zone'].resourceGroup" \
+                    -o tsv 2>/dev/null || true)
+
+                  EXISTING_LINK=""
+                  for zone_rg in $ALL_ZONE_RGS; do
+                    LINK_CHECK=$(az network private-dns link vnet list \
+                      --resource-group "$zone_rg" \
+                      --zone-name "$zone" \
+                      --query "[].virtualNetwork.id" \
+                      -o tsv 2>/dev/null | grep -i "/$VNET_NAME$" || true)
+                    if [ -n "$LINK_CHECK" ]; then
+                      EXISTING_LINK="$LINK_CHECK (RG: $zone_rg)"
+                      break
+                    fi
+                  done
+
+                  if [ -n "$EXISTING_LINK" ]; then
+                    echo "⏭️  Lien DNS déjà présent pour $zone → $EXISTING_LINK"
                   else
                     echo "Création lien DNS: $link_name"
                     az network private-dns link vnet create \
                       --resource-group "$DNS_RG" \
                       --zone-name "$zone" \
                       --name "$link_name" \
-                      --virtual-network "/subscriptions/$(az account show --query id -o tsv)/resourceGroups/$VNET_RG/providers/Microsoft.Network/virtualNetworks/$VNET_NAME" \
+                      --virtual-network "$VNET_ID" \
                       --registration-enabled false \
                       --only-show-errors >/dev/null
                   fi
                 }
 
+                # ----------------------------------------------------------------
+                # Private Endpoint + DNS Zone Group (idempotent)
+                # FIX 1: utilise SUBNET_ID complet pour le cross-RG
+                # FIX 2: --private-dns-zone attend un resource ID, pas un nom
+                # ----------------------------------------------------------------
                 ensure_private_endpoint() {
                   local pe_name="$1"
                   local target_id="$2"
                   local group_id="$3"
                   local zone_name="$4"
+                  local dns_zone_id="/subscriptions/$SUBSCRIPTION_ID/resourceGroups/$DNS_RG/providers/Microsoft.Network/privateDnsZones/$zone_name"
 
-                  if az network private-endpoint show --resource-group "$RG" --name "$pe_name" >/dev/null 2>&1; then
-                    echo "Private Endpoint déjà présent: $pe_name"
+                  if az network private-endpoint show \
+                    --resource-group "$RG" \
+                    --name "$pe_name" >/dev/null 2>&1; then
+                    echo "⏭️  Private Endpoint déjà présent: $pe_name"
                   else
                     echo "Création Private Endpoint: $pe_name"
                     az network private-endpoint create \
                       --resource-group "$RG" \
                       --name "$pe_name" \
                       --location "$LOC" \
-                      --vnet-name "$VNET_NAME" \
-                      --vnet-resource-group "$VNET_RG" \
-                      --subnet "$SUBNET_NAME" \
+                      --subnet "$SUBNET_ID" \
                       --private-connection-resource-id "$target_id" \
                       --group-id "$group_id" \
                       --connection-name "${pe_name}-conn" \
@@ -211,44 +269,65 @@ stages:
                     --resource-group "$RG" \
                     --endpoint-name "$pe_name" \
                     --name "default" >/dev/null 2>&1; then
-                    echo "DNS zone group déjà présent pour $pe_name"
+                    echo "⏭️  DNS zone group déjà présent pour: $pe_name"
                   else
-                    echo "Association DNS privée pour $pe_name"
+                    echo "Association DNS privée pour: $pe_name"
                     az network private-endpoint dns-zone-group create \
                       --resource-group "$RG" \
                       --endpoint-name "$pe_name" \
                       --name "default" \
-                      --private-dns-zone "$zone_name" \
-                      --zone-name "$zone_name" \
+                      --private-dns-zone "$dns_zone_id" \
+                      --zone-name "default" \
                       --only-show-errors >/dev/null
                   fi
                 }
 
+                # ================================================================
+                # EXÉCUTION
+                # ================================================================
                 print_audit
 
                 ensure_vnet
                 ensure_subnet
 
+                # --- Storage Blob ---
                 ensure_private_dns_zone "privatelink.blob.core.windows.net"
                 ensure_private_dns_link "privatelink.blob.core.windows.net"
-                ensure_private_endpoint "pe-${STORAGE_NAME}-blob" "$STORAGE_ID" "blob" "privatelink.blob.core.windows.net"
+                ensure_private_endpoint \
+                  "pe-${STORAGE_NAME}-blob" \
+                  "$STORAGE_ID" \
+                  "blob" \
+                  "privatelink.blob.core.windows.net"
 
+                # --- AI Search ---
                 ensure_private_dns_zone "privatelink.search.windows.net"
                 ensure_private_dns_link "privatelink.search.windows.net"
-                ensure_private_endpoint "pe-${SEARCH_NAME}-search" "$SEARCH_ID" "searchService" "privatelink.search.windows.net"
+                ensure_private_endpoint \
+                  "pe-${SEARCH_NAME}-search" \
+                  "$SEARCH_ID" \
+                  "searchService" \
+                  "privatelink.search.windows.net"
 
+                # --- ACR (Premium uniquement) ---
                 ACR_PRIVATE_READY="false"
                 if [ "$ACR_SKU" = "Premium" ]; then
                   ensure_private_dns_zone "privatelink.azurecr.io"
                   ensure_private_dns_link "privatelink.azurecr.io"
-                  ensure_private_endpoint "pe-${ACR_NAME}-registry" "$ACR_ID" "registry" "privatelink.azurecr.io"
+                  ensure_private_endpoint \
+                    "pe-${ACR_NAME}-registry" \
+                    "$ACR_ID" \
+                    "registry" \
+                    "privatelink.azurecr.io"
                   ACR_PRIVATE_READY="true"
                 else
-                  echo "⚠️ ACR SKU=$ACR_SKU: Private Endpoint non supporté."
-                  echo "   -> Passez ACR en Premium pour une fermeture complète côté ACR."
+                  echo "⚠️  ACR SKU=$ACR_SKU: Private Endpoint non supporté (Premium requis)."
                 fi
 
-                echo "Fermeture des accès publics sur Storage et AI Search"
+                # ================================================================
+                # Fermeture des accès publics
+                # ================================================================
+                echo ""
+                echo "Fermeture des accès publics sur Storage et AI Search..."
 
                 az storage account update \
                   --name "$STORAGE_NAME" \
@@ -265,19 +344,19 @@ stages:
                   --only-show-errors >/dev/null
 
                 if [ "$ACR_PRIVATE_READY" = "true" ]; then
-                  echo "Fermeture de l'accès public ACR"
+                  echo "Fermeture de l'accès public ACR..."
                   az acr update \
                     --name "$ACR_NAME" \
                     --resource-group "$RG" \
                     --public-network-enabled false \
                     --only-show-errors >/dev/null
                 else
-                  echo "⚠️ ACR ne peut pas être fermé sans SKU Premium."
+                  echo "⚠️  ACR conserve l'accès public (SKU non Premium)."
                 fi
 
                 echo ""
                 echo "✅ Durcissement réseau terminé"
-                echo "ℹ️ Monitoring (Log Analytics/App Insights) laissé public selon la politique demandée."
-                echo "ℹ️ Container Apps non modifié selon l'exception demandée."
+                echo "ℹ️  Monitoring (Log Analytics/App Insights) laissé public selon la politique demandée."
+                echo "ℹ️  Container Apps non modifié selon l'exception demandée."
                 echo ""
                 print_audit

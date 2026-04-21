@@ -19,50 +19,92 @@ parameters:
 
 steps:
   - task: AzureCLI@2
-    displayName: '🔗 Créer Data Source'
+    displayName: '🔗 Créer Data Source AI Search'
     inputs:
       azureSubscription: ${{ parameters.azureSubscription }}
       scriptType: 'bash'
       scriptLocation: 'inlineScript'
       inlineScript: |
+        set -euo pipefail
+
         echo "================================================"
         echo "    CRÉATION DU DATA SOURCE                     "
         echo "================================================"
         echo ""
-        
+
+        RG="${{ parameters.resourceGroupName }}"
+        SEARCH_NAME="${{ parameters.aiSearchName }}"
+        STORAGE_NAME="${{ parameters.storageAccountName }}"
+        DS_NAME="${{ parameters.dataSourceName }}"
+        CONTAINER_NAME="${{ parameters.containerName }}"
+        COMPANION_NAME="${{ parameters.companionName }}"
+
+        SEARCH_URL="https://${SEARCH_NAME}.search.windows.net"
+
+        # Récupération de la clé admin (masquée dans les logs via variable locale)
         SEARCH_KEY=$(az search admin-key show \
-          --service-name "${{ parameters.aiSearchName }}" \
-          --resource-group "${{ parameters.resourceGroupName }}" \
+          --service-name "$SEARCH_NAME" \
+          --resource-group "$RG" \
           --query primaryKey -o tsv)
-        
-        SEARCH_URL="https://${{ parameters.aiSearchName }}.search.windows.net"
-        
-        STORAGE_CONNECTION=$(az storage account show-connection-string \
-          --name "${{ parameters.storageAccountName }}" \
-          --resource-group "${{ parameters.resourceGroupName }}" \
-          --query connectionString -o tsv)
-        
-        echo "Création du Data Source '${{ parameters.dataSourceName }}'..."
-        
-        HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
-          -X PUT "$SEARCH_URL/datasources/${{ parameters.dataSourceName }}?api-version=2024-07-01" \
+
+        # Récupération du resource ID du Storage (pour Managed Identity)
+        STORAGE_ID=$(az storage account show \
+          --name "$STORAGE_NAME" \
+          --resource-group "$RG" \
+          --query id -o tsv)
+
+        # ----------------------------------------------------------------
+        # Vérification si le Data Source existe déjà
+        # ----------------------------------------------------------------
+        echo "Vérification du Data Source '$DS_NAME'..."
+
+        EXISTING_STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
+          -X GET "$SEARCH_URL/datasources/$DS_NAME?api-version=2024-07-01" \
+          -H "api-key: $SEARCH_KEY")
+
+        if [ "$EXISTING_STATUS" == "200" ]; then
+          echo "⏭️  Data Source '$DS_NAME' déjà présent, skip."
+          exit 0
+        fi
+
+        # ----------------------------------------------------------------
+        # Création avec Managed Identity (plus de connection string)
+        # Compatible avec Storage en accès public désactivé
+        # ----------------------------------------------------------------
+        echo "Création du Data Source '$DS_NAME'..."
+
+        PAYLOAD=$(cat <<EOF
+        {
+          "name": "$DS_NAME",
+          "type": "azureblob",
+          "credentials": {
+            "connectionString": "ResourceId=$STORAGE_ID;"
+          },
+          "container": {
+            "name": "$CONTAINER_NAME"
+          },
+          "description": "Data source for companion $COMPANION_NAME",
+          "identity": {
+            "@odata.type": "#Microsoft.Azure.Search.DataUserAssignedIdentity",
+            "userAssignedIdentity": null
+          }
+        }
+        EOF
+        )
+
+        HTTP_RESPONSE=$(curl -s -w "\n%{http_code}" \
+          -X PUT "$SEARCH_URL/datasources/$DS_NAME?api-version=2024-07-01" \
           -H "Content-Type: application/json" \
           -H "api-key: $SEARCH_KEY" \
-          -d '{
-            "name": "${{ parameters.dataSourceName }}",
-            "type": "azureblob",
-            "credentials": {
-              "connectionString": "'"$STORAGE_CONNECTION"'"
-            },
-            "container": {
-              "name": "${{ parameters.containerName }}"
-            },
-            "description": "Data source for companion ${{ parameters.companionName }}"
-          }')
-        
+          -d "$PAYLOAD")
+
+        HTTP_BODY=$(echo "$HTTP_RESPONSE" | head -n -1)
+        HTTP_STATUS=$(echo "$HTTP_RESPONSE" | tail -n 1)
+
         if [ "$HTTP_STATUS" == "201" ] || [ "$HTTP_STATUS" == "204" ]; then
-          echo "✅ Data Source créé/mis à jour"
+          echo "✅ Data Source '$DS_NAME' créé avec succès"
         else
           echo "❌ Erreur lors de la création du Data Source (HTTP $HTTP_STATUS)"
+          echo "   Détail: $HTTP_BODY"
           exit 1
         fi

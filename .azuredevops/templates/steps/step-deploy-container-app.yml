@@ -34,8 +34,6 @@ parameters:
     type: string
   - name: deleteOrphanedBlobs
     type: string
-  - name: syncPermissions
-    type: string
 
 steps:
   - task: AzureCLI@2
@@ -155,7 +153,7 @@ steps:
             "AZURE_BLOB_CONTAINER_NAME=${{ parameters.blobContainerName }}" \
             "AZURE_BLOB_PREFIX=" \
             "DELETE_ORPHANED_BLOBS=${{ parameters.deleteOrphanedBlobs }}" \
-            "SYNC_PERMISSIONS=${{ parameters.syncPermissions }}" \
+            "SYNC_PERMISSIONS=false" \
             "SYNC_SCHEDULE=${{ parameters.syncSchedule }}" \
             "APPLICATIONINSIGHTS_CONNECTION_STRING=$APP_INSIGHTS_CONNECTION_STRING" \
             "WEBSITES_INCLUDE_CLOUD_CERTS=true" \

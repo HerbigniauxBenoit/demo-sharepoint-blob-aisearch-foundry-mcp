@@ -32,7 +32,7 @@ stages:
       - job: CreateDataSource
         displayName: '4.1 Créer Data Source'
         pool:
-          vmImage: 'ubuntu-latest'
+          name: gptrusted-${{ parameters.environment }}
         steps:
           - template: ../steps/step-create-ai-search-datasource.yml
             parameters:
