@@ -207,7 +207,33 @@ stages:
                   exit 1
                 fi
 
-                SEARCH_URL="https://$SEARCH_NAME.search.windows.net"
+                SEARCH_PUBLIC_HOST="$SEARCH_NAME.search.windows.net"
+                SEARCH_PRIVATE_HOST="$SEARCH_NAME.privatelink.search.windows.net"
+
+                resolve_host() {
+                  local host="$1"
+                  if getent hosts "$host" >/dev/null 2>&1; then
+                    return 0
+                  fi
+                  if nslookup "$host" >/dev/null 2>&1; then
+                    return 0
+                  fi
+                  return 1
+                }
+
+                if resolve_host "$SEARCH_PUBLIC_HOST"; then
+                  SEARCH_HOST="$SEARCH_PUBLIC_HOST"
+                elif resolve_host "$SEARCH_PRIVATE_HOST"; then
+                  SEARCH_HOST="$SEARCH_PRIVATE_HOST"
+                else
+                  echo "❌ DNS AI Search non résolvable (public + privatelink)"
+                  echo "Host public    : $SEARCH_PUBLIC_HOST"
+                  echo "Host privatelink: $SEARCH_PRIVATE_HOST"
+                  exit 6
+                fi
+
+                SEARCH_URL="https://$SEARCH_HOST"
+                echo "Endpoint AI Search utilisé: $SEARCH_URL"
 
                 # Vérifier que l'index du compagnon existe
                 HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" \

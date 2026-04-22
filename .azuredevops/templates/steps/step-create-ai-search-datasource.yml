@@ -39,10 +39,34 @@ steps:
         CONTAINER_NAME="${{ parameters.containerName }}"
         COMPANION_NAME="${{ parameters.companionName }}"
 
-        SEARCH_URL="https://${SEARCH_NAME}.search.windows.net"
+        SEARCH_PUBLIC_HOST="${SEARCH_NAME}.search.windows.net"
+        SEARCH_PRIVATE_HOST="${SEARCH_NAME}.privatelink.search.windows.net"
+
+        resolve_host() {
+          local host="$1"
+          if getent hosts "$host" >/dev/null 2>&1; then
+            return 0
+          fi
+          if nslookup "$host" >/dev/null 2>&1; then
+            return 0
+          fi
+          return 1
+        }
+
+        select_search_host() {
+          if resolve_host "$SEARCH_PUBLIC_HOST"; then
+            echo "$SEARCH_PUBLIC_HOST"
+            return 0
+          fi
+          if resolve_host "$SEARCH_PRIVATE_HOST"; then
+            echo "$SEARCH_PRIVATE_HOST"
+            return 0
+          fi
+          return 1
+        }
 
         print_search_network_diagnostics() {
-          local host="${SEARCH_NAME}.search.windows.net"
+          local host="$1"
           echo "=== Diagnostic réseau AI Search ==="
           echo "Host: $host"
           echo "Résolution DNS (getent):"
@@ -51,6 +75,16 @@ steps:
           nslookup "$host" 2>/dev/null || true
           echo "==================================="
         }
+
+        if ! SEARCH_HOST=$(select_search_host); then
+          echo "❌ Résolution DNS impossible pour AI Search (public et privatelink)"
+          print_search_network_diagnostics "$SEARCH_PUBLIC_HOST"
+          print_search_network_diagnostics "$SEARCH_PRIVATE_HOST"
+          exit 6
+        fi
+
+        SEARCH_URL="https://${SEARCH_HOST}"
+        echo "Endpoint AI Search utilisé: $SEARCH_URL"
 
         # Récupération de la clé admin (masquée dans les logs via variable locale)
         SEARCH_KEY=$(az search admin-key show \
@@ -76,7 +110,7 @@ steps:
 
         if [ "$CURL_EXIT" -ne 0 ]; then
           echo "❌ curl a échoué (exit code $CURL_EXIT) en joignant AI Search"
-          print_search_network_diagnostics
+          print_search_network_diagnostics "$SEARCH_HOST"
           exit "$CURL_EXIT"
         fi
 
@@ -119,7 +153,7 @@ steps:
 
         if [ "$CURL_EXIT" -ne 0 ]; then
           echo "❌ curl a échoué (exit code $CURL_EXIT) pendant la création du Data Source"
-          print_search_network_diagnostics
+          print_search_network_diagnostics "$SEARCH_HOST"
           exit "$CURL_EXIT"
         fi
 
