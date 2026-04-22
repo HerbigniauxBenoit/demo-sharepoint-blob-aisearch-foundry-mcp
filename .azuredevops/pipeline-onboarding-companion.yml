@@ -141,6 +141,7 @@ stages:
   - template: templates/stages/stage-configure-ai-search.yml
     parameters:
       azureSubscription: $(azureSubscription)
+      environment: ${{ parameters.environment }}
       resourceGroupName: $(sharedResourceGroupName)
       aiSearchName: $(aiSearchName)
       storageAccountName: $(storageAccountName)

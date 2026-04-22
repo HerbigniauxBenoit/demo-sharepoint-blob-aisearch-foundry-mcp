@@ -20,6 +20,8 @@ parameters:
     type: string
   - name: companionName
     type: string
+  - name: environment
+    type: string
   - name: dependsOn
     type: object
     default: []
@@ -48,7 +50,7 @@ stages:
         displayName: '4.2 Créer Index'
         dependsOn: CreateDataSource
         pool:
-          vmImage: 'ubuntu-latest'
+          name: gptrusted-${{ parameters.environment }}
         steps:
           - template: ../steps/step-create-ai-search-index.yml
             parameters:
@@ -61,7 +63,7 @@ stages:
         displayName: '4.3 Créer Indexer'
         dependsOn: CreateIndex
         pool:
-          vmImage: 'ubuntu-latest'
+          name: gptrusted-${{ parameters.environment }}
         steps:
           - template: ../steps/step-create-ai-search-indexer.yml
             parameters:
