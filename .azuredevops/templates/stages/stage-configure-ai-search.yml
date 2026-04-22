@@ -36,6 +36,13 @@ stages:
         pool:
           name: gptrusted-${{ parameters.environment }}
         steps:
+          - template: ../steps/step-verify-private-dns-search.yml
+            parameters:
+              azureSubscription: ${{ parameters.azureSubscription }}
+              resourceGroupName: ${{ parameters.resourceGroupName }}
+              environment: ${{ parameters.environment }}
+              aiSearchName: ${{ parameters.aiSearchName }}
+
           - template: ../steps/step-create-ai-search-datasource.yml
             parameters:
               azureSubscription: ${{ parameters.azureSubscription }}

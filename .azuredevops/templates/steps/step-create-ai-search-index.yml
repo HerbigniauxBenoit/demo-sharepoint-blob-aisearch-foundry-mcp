@@ -90,8 +90,8 @@ steps:
         if ! SEARCH_HOST=$(select_search_host); then
           SEARCH_PRIVATE_IP=$(get_search_private_ip || true)
           if [ -n "$SEARCH_PRIVATE_IP" ]; then
-            SEARCH_HOST="$SEARCH_PRIVATE_HOST"
-            CURL_SEARCH_EXTRA_ARGS=(--resolve "${SEARCH_HOST}:443:${SEARCH_PRIVATE_IP}")
+            SEARCH_HOST="$SEARCH_PUBLIC_HOST"
+            CURL_SEARCH_EXTRA_ARGS=(--resolve "${SEARCH_PUBLIC_HOST}:443:${SEARCH_PRIVATE_IP}")
             echo "⚠️ DNS indisponible, contournement via Private Endpoint IP: $SEARCH_PRIVATE_IP"
           else
             echo "❌ Résolution DNS impossible pour AI Search (public et privatelink)"

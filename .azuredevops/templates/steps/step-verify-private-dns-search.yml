@@ -1,0 +1,120 @@
+# =============================================================================
+# Step Template : Vérifier DNS privé AI Search
+# =============================================================================
+parameters:
+  - name: azureSubscription
+    type: string
+  - name: resourceGroupName
+    type: string
+  - name: environment
+    type: string
+  - name: aiSearchName
+    type: string
+
+steps:
+  - task: AzureCLI@2
+    displayName: '🔎 Vérifier DNS privé AI Search'
+    inputs:
+      azureSubscription: ${{ parameters.azureSubscription }}
+      scriptType: 'bash'
+      scriptLocation: 'inlineScript'
+      inlineScript: |
+        set -euo pipefail
+
+        RG="${{ parameters.resourceGroupName }}"
+        SEARCH_NAME="${{ parameters.aiSearchName }}"
+        SEARCH_ZONE="privatelink.search.windows.net"
+
+        case "${{ parameters.environment }}" in
+          dev)  VNET_NAME="vnet-gptrusted-dev"  ;;
+          nprd) VNET_NAME="vnet-gptrusted-nprd" ;;
+          prod) VNET_NAME="vnet-gptrusted-prod" ;;
+          *)    VNET_NAME="vnet-gptrusted-${{ parameters.environment }}" ;;
+        esac
+
+        echo "================================================"
+        echo "    VÉRIFICATION DNS PRIVÉ AI SEARCH            "
+        echo "================================================"
+
+        VNET_COUNT=$(az network vnet list --query "length([?name=='$VNET_NAME'])" -o tsv)
+        if [ "$VNET_COUNT" -eq 0 ]; then
+          echo "❌ VNet '$VNET_NAME' introuvable"
+          exit 1
+        fi
+        if [ "$VNET_COUNT" -gt 1 ]; then
+          echo "❌ Plusieurs VNets nommés '$VNET_NAME' trouvés"
+          exit 1
+        fi
+
+        VNET_RG=$(az network vnet list --query "[?name=='$VNET_NAME']|[0].resourceGroup" -o tsv)
+        SUBSCRIPTION_ID=$(az account show --query id -o tsv)
+        VNET_ID="/subscriptions/$SUBSCRIPTION_ID/resourceGroups/$VNET_RG/providers/Microsoft.Network/virtualNetworks/$VNET_NAME"
+
+        echo "VNet cible: $VNET_NAME (RG: $VNET_RG)"
+
+        DNS_SERVERS=$(az network vnet show \
+          --resource-group "$VNET_RG" \
+          --name "$VNET_NAME" \
+          --query "dhcpOptions.dnsServers" -o tsv 2>/dev/null || true)
+
+        if [ -z "$DNS_SERVERS" ]; then
+          echo "✅ DNS VNet: Azure DNS par défaut"
+        else
+          echo "⚠️  DNS VNet custom détecté: $DNS_SERVERS"
+          echo "   Vérifiez le forwarder/conditional forwarder pour '$SEARCH_ZONE'."
+        fi
+
+        ERRORS=0
+
+        ZONE_RGS=$(az network private-dns zone list \
+          --query "[?name=='$SEARCH_ZONE'].resourceGroup" -o tsv 2>/dev/null || true)
+
+        if [ -z "$ZONE_RGS" ]; then
+          echo "❌ Zone DNS privée absente: $SEARCH_ZONE"
+          exit 1
+        fi
+
+        if [ "$(echo "$ZONE_RGS" | sed '/^$/d' | wc -l | tr -d ' ')" -gt 1 ]; then
+          echo "⚠️  Plusieurs zones '$SEARCH_ZONE' détectées:"
+          echo "$ZONE_RGS"
+        fi
+
+        if echo "$ZONE_RGS" | grep -Fxq "$RG"; then
+          ZONE_RG="$RG"
+        else
+          ZONE_RG=$(echo "$ZONE_RGS" | head -n 1)
+        fi
+
+        echo "Zone retenue: $SEARCH_ZONE (RG: $ZONE_RG)"
+
+        LINK_NAME=$(az network private-dns link vnet list \
+          --resource-group "$ZONE_RG" \
+          --zone-name "$SEARCH_ZONE" \
+          --query "[?virtualNetwork.id=='$VNET_ID']|[0].name" -o tsv 2>/dev/null || true)
+
+        if [ -z "$LINK_NAME" ]; then
+          echo "❌ Aucun lien VNet trouvé pour '$VNET_NAME' dans la zone '$SEARCH_ZONE'"
+          ERRORS=$((ERRORS + 1))
+        else
+          echo "✅ Lien zone/VNet: $LINK_NAME"
+        fi
+
+        SEARCH_A_RECORDS=$(az network private-dns record-set a show \
+          --resource-group "$ZONE_RG" \
+          --zone-name "$SEARCH_ZONE" \
+          --name "$SEARCH_NAME" \
+          --query "arecords[].ipv4Address" -o tsv 2>/dev/null || true)
+
+        if [ -z "$SEARCH_A_RECORDS" ]; then
+          echo "❌ Enregistrement A manquant: $SEARCH_NAME.$SEARCH_ZONE"
+          ERRORS=$((ERRORS + 1))
+        else
+          echo "✅ Enregistrement A: $SEARCH_NAME.$SEARCH_ZONE -> $SEARCH_A_RECORDS"
+        fi
+
+        if [ "$ERRORS" -gt 0 ]; then
+          echo "❌ Vérification DNS privé AI Search KO ($ERRORS erreur(s))"
+          exit 1
+        fi
+
+        echo "✅ Vérification DNS privé AI Search OK"
