@@ -42,7 +42,7 @@ stages:
       - job: HardenCompanionResources
         displayName: 'Appliquer sécurité au compagnon'
         pool:
-          vmImage: 'ubuntu-latest'
+          name: gptrusted-${{ parameters.environment }}
         steps:
           - task: AzureCLI@2
             displayName: '🔐 Sécuriser blob container, AI Search et Container App'

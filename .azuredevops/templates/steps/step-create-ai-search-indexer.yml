@@ -34,9 +34,21 @@ steps:
           --query primaryKey -o tsv)
         
         SEARCH_URL="https://${{ parameters.aiSearchName }}.search.windows.net"
+
+        print_search_network_diagnostics() {
+          local host="${{ parameters.aiSearchName }}.search.windows.net"
+          echo "=== Diagnostic réseau AI Search ==="
+          echo "Host: $host"
+          echo "Résolution DNS (getent):"
+          getent hosts "$host" || true
+          echo "Résolution DNS (nslookup):"
+          nslookup "$host" 2>/dev/null || true
+          echo "==================================="
+        }
         
         echo "Création de l'indexer '${{ parameters.indexerName }}'..."
         
+        CURL_EXIT=0
         HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
           -X PUT "$SEARCH_URL/indexers/${{ parameters.indexerName }}?api-version=2024-07-01" \
           -H "Content-Type: application/json" \
@@ -59,7 +71,13 @@ steps:
                 "mappingFunction": {"name": "base64Encode"}
               }
             ]
-          }')
+          }') || CURL_EXIT=$?
+
+        if [ "$CURL_EXIT" -ne 0 ]; then
+          echo "❌ curl a échoué (exit code $CURL_EXIT) pendant la création de l'indexer"
+          print_search_network_diagnostics
+          exit "$CURL_EXIT"
+        fi
         
         if [ "$HTTP_STATUS" == "201" ] || [ "$HTTP_STATUS" == "204" ]; then
           echo "✅ Indexer créé/mis à jour"

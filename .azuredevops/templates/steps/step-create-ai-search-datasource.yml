@@ -41,6 +41,17 @@ steps:
 
         SEARCH_URL="https://${SEARCH_NAME}.search.windows.net"
 
+        print_search_network_diagnostics() {
+          local host="${SEARCH_NAME}.search.windows.net"
+          echo "=== Diagnostic réseau AI Search ==="
+          echo "Host: $host"
+          echo "Résolution DNS (getent):"
+          getent hosts "$host" || true
+          echo "Résolution DNS (nslookup):"
+          nslookup "$host" 2>/dev/null || true
+          echo "==================================="
+        }
+
         # Récupération de la clé admin (masquée dans les logs via variable locale)
         SEARCH_KEY=$(az search admin-key show \
           --service-name "$SEARCH_NAME" \
@@ -58,9 +69,16 @@ steps:
         # ----------------------------------------------------------------
         echo "Vérification du Data Source '$DS_NAME'..."
 
+        CURL_EXIT=0
         EXISTING_STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
           -X GET "$SEARCH_URL/datasources/$DS_NAME?api-version=2024-07-01" \
-          -H "api-key: $SEARCH_KEY")
+          -H "api-key: $SEARCH_KEY") || CURL_EXIT=$?
+
+        if [ "$CURL_EXIT" -ne 0 ]; then
+          echo "❌ curl a échoué (exit code $CURL_EXIT) en joignant AI Search"
+          print_search_network_diagnostics
+          exit "$CURL_EXIT"
+        fi
 
         if [ "$EXISTING_STATUS" == "200" ]; then
           echo "⏭️  Data Source '$DS_NAME' déjà présent, skip."
@@ -92,11 +110,18 @@ steps:
         EOF
         )
 
+        CURL_EXIT=0
         HTTP_RESPONSE=$(curl -s -w "\n%{http_code}" \
           -X PUT "$SEARCH_URL/datasources/$DS_NAME?api-version=2024-07-01" \
           -H "Content-Type: application/json" \
           -H "api-key: $SEARCH_KEY" \
-          -d "$PAYLOAD")
+          -d "$PAYLOAD") || CURL_EXIT=$?
+
+        if [ "$CURL_EXIT" -ne 0 ]; then
+          echo "❌ curl a échoué (exit code $CURL_EXIT) pendant la création du Data Source"
+          print_search_network_diagnostics
+          exit "$CURL_EXIT"
+        fi
 
         HTTP_BODY=$(echo "$HTTP_RESPONSE" | head -n -1)
         HTTP_STATUS=$(echo "$HTTP_RESPONSE" | tail -n 1)
