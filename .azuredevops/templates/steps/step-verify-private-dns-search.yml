@@ -226,16 +226,35 @@ steps:
               set -e
 
               if [ "$ADD_EXIT" -ne 0 ]; then
-                echo "❌ Échec add-record pour $SEARCH_NAME.$SEARCH_ZONE (IP: $SEARCH_PE_IP)"
-                echo "$ADD_OUTPUT"
+                if echo "$ADD_OUTPUT" | grep -q "same 'ipv4Address'"; then
+                  echo "ℹ️  Record A déjà présent avec IP $SEARCH_PE_IP (idempotent)"
+                else
+                  echo "❌ Échec add-record pour $SEARCH_NAME.$SEARCH_ZONE (IP: $SEARCH_PE_IP)"
+                  echo "$ADD_OUTPUT"
+                fi
               fi
             fi
 
-            SEARCH_A_RECORDS=$(az network private-dns record-set a show \
-              --resource-group "$ZONE_RG" \
-              --zone-name "$SEARCH_ZONE" \
-              --name "$SEARCH_NAME" \
-              --query "arecords[].ipv4Address" -o tsv 2>/dev/null || true)
+            SEARCH_A_RECORDS=""
+            for i in $(seq 1 8); do
+              SEARCH_A_RECORDS=$(az network private-dns record-set a show \
+                --resource-group "$ZONE_RG" \
+                --zone-name "$SEARCH_ZONE" \
+                --name "$SEARCH_NAME" \
+                --query "arecords[].ipv4Address" -o tsv 2>/dev/null || true)
+
+              if [ -z "$SEARCH_A_RECORDS" ]; then
+                SEARCH_A_RECORDS=$(az network private-dns record-set a list \
+                  --resource-group "$ZONE_RG" \
+                  --zone-name "$SEARCH_ZONE" \
+                  --query "[?name=='$SEARCH_NAME'].arecords[].ipv4Address" -o tsv 2>/dev/null || true)
+              fi
+
+              if [ -n "$SEARCH_A_RECORDS" ]; then
+                break
+              fi
+              sleep 3
+            done
 
             if [ -z "$SEARCH_A_RECORDS" ]; then
               echo "❌ Impossible de créer l'enregistrement A pour $SEARCH_NAME.$SEARCH_ZONE"
