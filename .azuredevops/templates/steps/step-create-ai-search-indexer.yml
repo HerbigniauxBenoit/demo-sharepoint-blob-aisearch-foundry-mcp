@@ -27,6 +27,9 @@ steps:
         echo "    CRÉATION DE L'INDEXER                       "
         echo "================================================"
         echo ""
+
+        RG="${{ parameters.resourceGroupName }}"
+        SEARCH_NAME="${{ parameters.aiSearchName }}"
         
         SEARCH_KEY=$(az search admin-key show \
           --service-name "${{ parameters.aiSearchName }}" \
@@ -59,6 +62,23 @@ steps:
           return 1
         }
 
+        get_search_private_ip() {
+          local pe_name="pe-${SEARCH_NAME}-search"
+          local nic_id=""
+          nic_id=$(az network private-endpoint show \
+            --resource-group "$RG" \
+            --name "$pe_name" \
+            --query "networkInterfaces[0].id" -o tsv 2>/dev/null || true)
+
+          if [ -z "$nic_id" ]; then
+            return 1
+          fi
+
+          az network nic show \
+            --ids "$nic_id" \
+            --query "ipConfigurations[0].privateIPAddress" -o tsv 2>/dev/null || true
+        }
+
         print_search_network_diagnostics() {
           local host="$1"
           echo "=== Diagnostic réseau AI Search ==="
@@ -70,11 +90,19 @@ steps:
           echo "==================================="
         }
 
+        CURL_SEARCH_EXTRA_ARGS=()
         if ! SEARCH_HOST=$(select_search_host); then
-          echo "❌ Résolution DNS impossible pour AI Search (public et privatelink)"
-          print_search_network_diagnostics "$SEARCH_PUBLIC_HOST"
-          print_search_network_diagnostics "$SEARCH_PRIVATE_HOST"
-          exit 6
+          SEARCH_PRIVATE_IP=$(get_search_private_ip || true)
+          if [ -n "$SEARCH_PRIVATE_IP" ]; then
+            SEARCH_HOST="$SEARCH_PRIVATE_HOST"
+            CURL_SEARCH_EXTRA_ARGS=(--resolve "${SEARCH_HOST}:443:${SEARCH_PRIVATE_IP}")
+            echo "⚠️ DNS indisponible, contournement via Private Endpoint IP: $SEARCH_PRIVATE_IP"
+          else
+            echo "❌ Résolution DNS impossible pour AI Search (public et privatelink)"
+            print_search_network_diagnostics "$SEARCH_PUBLIC_HOST"
+            print_search_network_diagnostics "$SEARCH_PRIVATE_HOST"
+            exit 6
+          fi
         fi
 
         SEARCH_URL="https://${SEARCH_HOST}"
@@ -84,6 +112,7 @@ steps:
         
         CURL_EXIT=0
         HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
+          "${CURL_SEARCH_EXTRA_ARGS[@]}" \
           -X PUT "$SEARCH_URL/indexers/${{ parameters.indexerName }}?api-version=2024-07-01" \
           -H "Content-Type: application/json" \
           -H "api-key: $SEARCH_KEY" \

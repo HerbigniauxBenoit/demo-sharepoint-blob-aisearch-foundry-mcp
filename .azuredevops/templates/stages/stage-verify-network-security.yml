@@ -61,6 +61,8 @@ stages:
                 STORAGE_NAME="${{ parameters.storageAccountName }}"
                 SEARCH_NAME="${{ parameters.aiSearchName }}"
                 ACR_NAME="${{ parameters.acrName }}"
+                SUBSCRIPTION_ID=$(az account show --query id -o tsv)
+                VNET_ID="/subscriptions/$SUBSCRIPTION_ID/resourceGroups/$VNET_RG/providers/Microsoft.Network/virtualNetworks/$VNET_NAME"
 
                 echo "============================================================"
                 echo "        VÉRIFICATION DURCISSEMENT RÉSEAU PARTAGÉ"
@@ -173,6 +175,67 @@ stages:
                   fi
                 else
                   echo "ℹ️  ACR non-Premium ($ACR_SKU): Private Endpoint non applicable"
+                fi
+
+                echo ""
+                echo "=== Vérification DNS Privé ==="
+
+                verify_private_dns_for_zone() {
+                  local zone="$1"
+                  local record_name="$2"
+                  local label="$3"
+
+                  local zone_rgs=""
+                  local zone_rg=""
+                  local linked=""
+                  local record_ips=""
+
+                  zone_rgs=$(az network private-dns zone list \
+                    --query "[?name=='$zone'].resourceGroup" -o tsv 2>/dev/null || true)
+
+                  if [ -z "$zone_rgs" ]; then
+                    echo "❌ Zone DNS privée absente: $zone"
+                    ERRORS=$((ERRORS + 1))
+                    return
+                  fi
+
+                  if [ "$(echo "$zone_rgs" | sed '/^$/d' | wc -l | tr -d ' ')" -gt 1 ]; then
+                    echo "⚠️  Plusieurs zones privées détectées pour '$zone'"
+                  fi
+
+                  zone_rg=$(echo "$zone_rgs" | head -n 1)
+
+                  linked=$(az network private-dns link vnet list \
+                    --resource-group "$zone_rg" \
+                    --zone-name "$zone" \
+                    --query "[?virtualNetwork.id=='$VNET_ID'].name | [0]" -o tsv 2>/dev/null || true)
+
+                  if [ -z "$linked" ]; then
+                    echo "❌ Zone '$zone' non liée au VNet '$VNET_NAME' (zone RG: $zone_rg)"
+                    ERRORS=$((ERRORS + 1))
+                  else
+                    echo "✅ Zone '$zone' liée au VNet via '$linked' (RG: $zone_rg)"
+                  fi
+
+                  record_ips=$(az network private-dns record-set a show \
+                    --resource-group "$zone_rg" \
+                    --zone-name "$zone" \
+                    --name "$record_name" \
+                    --query "arecords[].ipv4Address" -o tsv 2>/dev/null || true)
+
+                  if [ -z "$record_ips" ]; then
+                    echo "❌ Enregistrement A manquant: $record_name.$zone ($label)"
+                    ERRORS=$((ERRORS + 1))
+                  else
+                    echo "✅ Enregistrement A présent: $record_name.$zone -> $record_ips"
+                  fi
+                }
+
+                verify_private_dns_for_zone "privatelink.search.windows.net" "$SEARCH_NAME" "AI Search"
+                verify_private_dns_for_zone "privatelink.blob.core.windows.net" "$STORAGE_NAME" "Storage Blob"
+
+                if [ "$ACR_SKU" = "Premium" ]; then
+                  verify_private_dns_for_zone "privatelink.azurecr.io" "$ACR_NAME" "ACR"
                 fi
 
                 echo ""

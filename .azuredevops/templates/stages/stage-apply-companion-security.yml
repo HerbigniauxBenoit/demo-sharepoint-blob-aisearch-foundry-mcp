@@ -221,15 +221,40 @@ stages:
                   return 1
                 }
 
+                get_search_private_ip() {
+                  local pe_name="pe-${SEARCH_NAME}-search"
+                  local nic_id=""
+                  nic_id=$(az network private-endpoint show \
+                    --resource-group "$RG" \
+                    --name "$pe_name" \
+                    --query "networkInterfaces[0].id" -o tsv 2>/dev/null || true)
+
+                  if [ -z "$nic_id" ]; then
+                    return 1
+                  fi
+
+                  az network nic show \
+                    --ids "$nic_id" \
+                    --query "ipConfigurations[0].privateIPAddress" -o tsv 2>/dev/null || true
+                }
+
+                CURL_SEARCH_EXTRA_ARGS=()
                 if resolve_host "$SEARCH_PUBLIC_HOST"; then
                   SEARCH_HOST="$SEARCH_PUBLIC_HOST"
                 elif resolve_host "$SEARCH_PRIVATE_HOST"; then
                   SEARCH_HOST="$SEARCH_PRIVATE_HOST"
                 else
-                  echo "❌ DNS AI Search non résolvable (public + privatelink)"
-                  echo "Host public    : $SEARCH_PUBLIC_HOST"
-                  echo "Host privatelink: $SEARCH_PRIVATE_HOST"
-                  exit 6
+                  SEARCH_PRIVATE_IP=$(get_search_private_ip || true)
+                  if [ -n "$SEARCH_PRIVATE_IP" ]; then
+                    SEARCH_HOST="$SEARCH_PRIVATE_HOST"
+                    CURL_SEARCH_EXTRA_ARGS=(--resolve "${SEARCH_HOST}:443:${SEARCH_PRIVATE_IP}")
+                    echo "⚠️ DNS indisponible, contournement via Private Endpoint IP: $SEARCH_PRIVATE_IP"
+                  else
+                    echo "❌ DNS AI Search non résolvable (public + privatelink)"
+                    echo "Host public    : $SEARCH_PUBLIC_HOST"
+                    echo "Host privatelink: $SEARCH_PRIVATE_HOST"
+                    exit 6
+                  fi
                 fi
 
                 SEARCH_URL="https://$SEARCH_HOST"
@@ -237,6 +262,7 @@ stages:
 
                 # Vérifier que l'index du compagnon existe
                 HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
+                  "${CURL_SEARCH_EXTRA_ARGS[@]}" \
                   -X GET "$SEARCH_URL/indexes/$INDEX_NAME?api-version=2024-07-01" \
                   -H "api-key: $SEARCH_KEY")
 
@@ -249,6 +275,7 @@ stages:
 
                 # Vérifier datasource
                 HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
+                  "${CURL_SEARCH_EXTRA_ARGS[@]}" \
                   -X GET "$SEARCH_URL/datasources/$DATASOURCE_NAME?api-version=2024-07-01" \
                   -H "api-key: $SEARCH_KEY")
 
@@ -261,6 +288,7 @@ stages:
 
                 # Vérifier indexer
                 HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
+                  "${CURL_SEARCH_EXTRA_ARGS[@]}" \
                   -X GET "$SEARCH_URL/indexers/$INDEXER_NAME?api-version=2024-07-01" \
                   -H "api-key: $SEARCH_KEY")
 

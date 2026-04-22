@@ -179,17 +179,40 @@ stages:
                 # ----------------------------------------------------------------
                 ensure_private_dns_zone() {
                   local zone="$1"
-                  if az network private-dns zone show \
-                    --resource-group "$DNS_RG" \
-                    --name "$zone" >/dev/null 2>&1; then
-                    echo "⏭️  Zone DNS privée déjà présente: $zone"
-                  else
-                    echo "Création zone DNS privée: $zone"
+                  local all_zone_rgs=""
+                  local count="0"
+                  all_zone_rgs=$(az network private-dns zone list \
+                    --query "[?name=='$zone'].resourceGroup" \
+                    -o tsv 2>/dev/null || true)
+
+                  if [ -n "$all_zone_rgs" ]; then
+                    count=$(echo "$all_zone_rgs" | sed '/^$/d' | wc -l | tr -d ' ')
+                  fi
+
+                  if [ "$count" -eq 0 ]; then
+                    echo "Création zone DNS privée: $zone (RG: $DNS_RG)"
                     az network private-dns zone create \
                       --resource-group "$DNS_RG" \
                       --name "$zone" \
                       --only-show-errors >/dev/null
+                    echo "$DNS_RG"
+                    return 0
                   fi
+
+                  if [ "$count" -eq 1 ]; then
+                    echo "$all_zone_rgs" | head -n 1
+                    return 0
+                  fi
+
+                  if echo "$all_zone_rgs" | grep -Fxq "$DNS_RG"; then
+                    echo "⚠️  Plusieurs zones privées '$zone' détectées. Zone retenue: $DNS_RG"
+                    echo "$DNS_RG"
+                    return 0
+                  fi
+
+                  selected_rg=$(echo "$all_zone_rgs" | head -n 1)
+                  echo "⚠️  Plusieurs zones privées '$zone' détectées. Zone retenue: $selected_rg"
+                  echo "$selected_rg"
                 }
 
                 # ----------------------------------------------------------------
@@ -202,32 +225,21 @@ stages:
                 # ----------------------------------------------------------------
                 ensure_private_dns_link() {
                   local zone="$1"
+                  local zone_rg="$2"
                   local link_name="link-${zone//./-}"
 
-                  # Récupérer tous les RGs qui hébergent une zone du même nom
-                  ALL_ZONE_RGS=$(az network private-dns zone list \
-                    --query "[?name=='$zone'].resourceGroup" \
+                  EXISTING_LINK=$(az network private-dns link vnet list \
+                    --resource-group "$zone_rg" \
+                    --zone-name "$zone" \
+                    --query "[?virtualNetwork.id=='$VNET_ID'].name | [0]" \
                     -o tsv 2>/dev/null || true)
 
-                  EXISTING_LINK=""
-                  for zone_rg in $ALL_ZONE_RGS; do
-                    LINK_CHECK=$(az network private-dns link vnet list \
-                      --resource-group "$zone_rg" \
-                      --zone-name "$zone" \
-                      --query "[].virtualNetwork.id" \
-                      -o tsv 2>/dev/null | grep -i "/$VNET_NAME$" || true)
-                    if [ -n "$LINK_CHECK" ]; then
-                      EXISTING_LINK="$LINK_CHECK (RG: $zone_rg)"
-                      break
-                    fi
-                  done
-
                   if [ -n "$EXISTING_LINK" ]; then
-                    echo "⏭️  Lien DNS déjà présent pour $zone → $EXISTING_LINK"
+                    echo "⏭️  Lien DNS déjà présent pour $zone (RG: $zone_rg) → $EXISTING_LINK"
                   else
-                    echo "Création lien DNS: $link_name"
+                    echo "Création lien DNS: $link_name (zone RG: $zone_rg)"
                     az network private-dns link vnet create \
-                      --resource-group "$DNS_RG" \
+                      --resource-group "$zone_rg" \
                       --zone-name "$zone" \
                       --name "$link_name" \
                       --virtual-network "$VNET_ID" \
@@ -246,7 +258,8 @@ stages:
                   local target_id="$2"
                   local group_id="$3"
                   local zone_name="$4"
-                  local dns_zone_id="/subscriptions/$SUBSCRIPTION_ID/resourceGroups/$DNS_RG/providers/Microsoft.Network/privateDnsZones/$zone_name"
+                  local zone_rg="$5"
+                  local dns_zone_id="/subscriptions/$SUBSCRIPTION_ID/resourceGroups/$zone_rg/providers/Microsoft.Network/privateDnsZones/$zone_name"
 
                   if az network private-endpoint show \
                     --resource-group "$RG" \
@@ -291,33 +304,36 @@ stages:
                 ensure_subnet
 
                 # --- Storage Blob ---
-                ensure_private_dns_zone "privatelink.blob.core.windows.net"
-                ensure_private_dns_link "privatelink.blob.core.windows.net"
+                BLOB_ZONE_RG=$(ensure_private_dns_zone "privatelink.blob.core.windows.net" | tail -n 1)
+                ensure_private_dns_link "privatelink.blob.core.windows.net" "$BLOB_ZONE_RG"
                 ensure_private_endpoint \
                   "pe-${STORAGE_NAME}-blob" \
                   "$STORAGE_ID" \
                   "blob" \
-                  "privatelink.blob.core.windows.net"
+                  "privatelink.blob.core.windows.net" \
+                  "$BLOB_ZONE_RG"
 
                 # --- AI Search ---
-                ensure_private_dns_zone "privatelink.search.windows.net"
-                ensure_private_dns_link "privatelink.search.windows.net"
+                SEARCH_ZONE_RG=$(ensure_private_dns_zone "privatelink.search.windows.net" | tail -n 1)
+                ensure_private_dns_link "privatelink.search.windows.net" "$SEARCH_ZONE_RG"
                 ensure_private_endpoint \
                   "pe-${SEARCH_NAME}-search" \
                   "$SEARCH_ID" \
                   "searchService" \
-                  "privatelink.search.windows.net"
+                  "privatelink.search.windows.net" \
+                  "$SEARCH_ZONE_RG"
 
                 # --- ACR (Premium uniquement) ---
                 ACR_PRIVATE_READY="false"
                 if [ "$ACR_SKU" = "Premium" ]; then
-                  ensure_private_dns_zone "privatelink.azurecr.io"
-                  ensure_private_dns_link "privatelink.azurecr.io"
+                  ACR_ZONE_RG=$(ensure_private_dns_zone "privatelink.azurecr.io" | tail -n 1)
+                  ensure_private_dns_link "privatelink.azurecr.io" "$ACR_ZONE_RG"
                   ensure_private_endpoint \
                     "pe-${ACR_NAME}-registry" \
                     "$ACR_ID" \
                     "registry" \
-                    "privatelink.azurecr.io"
+                    "privatelink.azurecr.io" \
+                    "$ACR_ZONE_RG"
                   ACR_PRIVATE_READY="true"
                 else
                   echo "⚠️  ACR SKU=$ACR_SKU: Private Endpoint non supporté (Premium requis)."
