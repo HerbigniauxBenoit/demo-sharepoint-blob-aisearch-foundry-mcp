@@ -49,6 +49,7 @@ steps:
         VNET_RG=$(az network vnet list --query "[?name=='$VNET_NAME']|[0].resourceGroup" -o tsv)
         SUBSCRIPTION_ID=$(az account show --query id -o tsv)
         VNET_ID="/subscriptions/$SUBSCRIPTION_ID/resourceGroups/$VNET_RG/providers/Microsoft.Network/virtualNetworks/$VNET_NAME"
+        PE_NAME="pe-${SEARCH_NAME}-search"
 
         echo "VNet cible: $VNET_NAME (RG: $VNET_RG)"
 
@@ -84,8 +85,25 @@ steps:
         else
           ZONE_RG=$(echo "$ZONE_RGS" | head -n 1)
         fi
+        ZONE_ID="/subscriptions/$SUBSCRIPTION_ID/resourceGroups/$ZONE_RG/providers/Microsoft.Network/privateDnsZones/$SEARCH_ZONE"
 
         echo "Zone retenue: $SEARCH_ZONE (RG: $ZONE_RG)"
+
+        get_search_pe_private_ip() {
+          local nic_id=""
+          nic_id=$(az network private-endpoint show \
+            --resource-group "$RG" \
+            --name "$PE_NAME" \
+            --query "networkInterfaces[0].id" -o tsv 2>/dev/null || true)
+
+          if [ -z "$nic_id" ]; then
+            return 1
+          fi
+
+          az network nic show \
+            --ids "$nic_id" \
+            --query "ipConfigurations[0].privateIPAddress" -o tsv 2>/dev/null || true
+        }
 
         LINK_NAME=$(az network private-dns link vnet list \
           --resource-group "$ZONE_RG" \
@@ -93,8 +111,27 @@ steps:
           --query "[?virtualNetwork.id=='$VNET_ID']|[0].name" -o tsv 2>/dev/null || true)
 
         if [ -z "$LINK_NAME" ]; then
-          echo "❌ Aucun lien VNet trouvé pour '$VNET_NAME' dans la zone '$SEARCH_ZONE'"
-          ERRORS=$((ERRORS + 1))
+          echo "⚠️  Lien VNet manquant pour '$VNET_NAME' dans '$SEARCH_ZONE' - tentative de correction"
+          LINK_NAME="link-${SEARCH_ZONE//./-}"
+          az network private-dns link vnet create \
+            --resource-group "$ZONE_RG" \
+            --zone-name "$SEARCH_ZONE" \
+            --name "$LINK_NAME" \
+            --virtual-network "$VNET_ID" \
+            --registration-enabled false \
+            --only-show-errors >/dev/null || true
+
+          LINK_NAME=$(az network private-dns link vnet list \
+            --resource-group "$ZONE_RG" \
+            --zone-name "$SEARCH_ZONE" \
+            --query "[?virtualNetwork.id=='$VNET_ID']|[0].name" -o tsv 2>/dev/null || true)
+
+          if [ -z "$LINK_NAME" ]; then
+            echo "❌ Impossible de créer le lien zone/VNet"
+            ERRORS=$((ERRORS + 1))
+          else
+            echo "✅ Lien zone/VNet créé: $LINK_NAME"
+          fi
         else
           echo "✅ Lien zone/VNet: $LINK_NAME"
         fi
@@ -106,8 +143,58 @@ steps:
           --query "arecords[].ipv4Address" -o tsv 2>/dev/null || true)
 
         if [ -z "$SEARCH_A_RECORDS" ]; then
-          echo "❌ Enregistrement A manquant: $SEARCH_NAME.$SEARCH_ZONE"
-          ERRORS=$((ERRORS + 1))
+          echo "⚠️  Enregistrement A manquant: $SEARCH_NAME.$SEARCH_ZONE - tentative de correction"
+
+          # Vérifie que le DNS zone group du PE pointe bien vers la zone Search retenue
+          DNS_ZONE_IDS=$(az network private-endpoint dns-zone-group show \
+            --resource-group "$RG" \
+            --endpoint-name "$PE_NAME" \
+            --name "default" \
+            --query "privateDnsZoneConfigs[].privateDnsZoneId" -o tsv 2>/dev/null || true)
+
+          if ! echo "$DNS_ZONE_IDS" | grep -Fq "$ZONE_ID"; then
+            echo "⚠️  DNS zone group du PE incohérent - recréation"
+            az network private-endpoint dns-zone-group delete \
+              --resource-group "$RG" \
+              --endpoint-name "$PE_NAME" \
+              --name "default" \
+              --yes \
+              --only-show-errors >/dev/null 2>&1 || true
+
+            az network private-endpoint dns-zone-group create \
+              --resource-group "$RG" \
+              --endpoint-name "$PE_NAME" \
+              --name "default" \
+              --private-dns-zone "$ZONE_ID" \
+              --zone-name "default" \
+              --only-show-errors >/dev/null
+          fi
+
+          SEARCH_PE_IP=$(get_search_pe_private_ip || true)
+          if [ -z "$SEARCH_PE_IP" ]; then
+            echo "❌ Impossible de récupérer l'IP privée du Private Endpoint '$PE_NAME'"
+            ERRORS=$((ERRORS + 1))
+          else
+            az network private-dns record-set a add-record \
+              --resource-group "$ZONE_RG" \
+              --zone-name "$SEARCH_ZONE" \
+              --record-set-name "$SEARCH_NAME" \
+              --ipv4-address "$SEARCH_PE_IP" \
+              --only-show-errors >/dev/null 2>&1 || true
+
+            SEARCH_A_RECORDS=$(az network private-dns record-set a show \
+              --resource-group "$ZONE_RG" \
+              --zone-name "$SEARCH_ZONE" \
+              --name "$SEARCH_NAME" \
+              --query "arecords[].ipv4Address" -o tsv 2>/dev/null || true)
+
+            if [ -z "$SEARCH_A_RECORDS" ]; then
+              echo "❌ Impossible de créer l'enregistrement A pour $SEARCH_NAME.$SEARCH_ZONE"
+              ERRORS=$((ERRORS + 1))
+            else
+              echo "✅ Enregistrement A recréé: $SEARCH_NAME.$SEARCH_ZONE -> $SEARCH_A_RECORDS"
+            fi
+          fi
         else
           echo "✅ Enregistrement A: $SEARCH_NAME.$SEARCH_ZONE -> $SEARCH_A_RECORDS"
         fi
