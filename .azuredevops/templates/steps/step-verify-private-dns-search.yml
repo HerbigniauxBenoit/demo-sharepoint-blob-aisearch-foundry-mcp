@@ -168,6 +168,19 @@ steps:
               --private-dns-zone "$ZONE_ID" \
               --zone-name "default" \
               --only-show-errors >/dev/null
+
+            # La création des enregistrements DNS via zone-group peut être asynchrone
+            for i in $(seq 1 12); do
+              SEARCH_A_RECORDS=$(az network private-dns record-set a show \
+                --resource-group "$ZONE_RG" \
+                --zone-name "$SEARCH_ZONE" \
+                --name "$SEARCH_NAME" \
+                --query "arecords[].ipv4Address" -o tsv 2>/dev/null || true)
+              if [ -n "$SEARCH_A_RECORDS" ]; then
+                break
+              fi
+              sleep 5
+            done
           fi
 
           SEARCH_PE_IP=$(get_search_pe_private_ip || true)
@@ -175,12 +188,48 @@ steps:
             echo "❌ Impossible de récupérer l'IP privée du Private Endpoint '$PE_NAME'"
             ERRORS=$((ERRORS + 1))
           else
-            az network private-dns record-set a add-record \
-              --resource-group "$ZONE_RG" \
-              --zone-name "$SEARCH_ZONE" \
-              --record-set-name "$SEARCH_NAME" \
-              --ipv4-address "$SEARCH_PE_IP" \
-              --only-show-errors >/dev/null 2>&1 || true
+            if [ -z "$SEARCH_A_RECORDS" ]; then
+              # Cas fréquent: un CNAME existe déjà avec le même nom, ce qui bloque la création du A
+              CNAME_TARGET=$(az network private-dns record-set cname show \
+                --resource-group "$ZONE_RG" \
+                --zone-name "$SEARCH_ZONE" \
+                --name "$SEARCH_NAME" \
+                --query "cnameRecord.cname" -o tsv 2>/dev/null || true)
+
+              if [ -n "$CNAME_TARGET" ]; then
+                echo "⚠️  Conflit détecté: CNAME existant '$SEARCH_NAME' -> '$CNAME_TARGET'"
+                echo "   Suppression du CNAME pour permettre la création du record A"
+                az network private-dns record-set cname delete \
+                  --resource-group "$ZONE_RG" \
+                  --zone-name "$SEARCH_ZONE" \
+                  --name "$SEARCH_NAME" \
+                  --yes \
+                  --only-show-errors >/dev/null
+              fi
+
+              # Création explicite du record-set A puis ajout de l'IP PE
+              az network private-dns record-set a create \
+                --resource-group "$ZONE_RG" \
+                --zone-name "$SEARCH_ZONE" \
+                --name "$SEARCH_NAME" \
+                --ttl 10 \
+                --only-show-errors >/dev/null 2>&1 || true
+
+              set +e
+              ADD_OUTPUT=$(az network private-dns record-set a add-record \
+                --resource-group "$ZONE_RG" \
+                --zone-name "$SEARCH_ZONE" \
+                --record-set-name "$SEARCH_NAME" \
+                --ipv4-address "$SEARCH_PE_IP" \
+                --only-show-errors 2>&1)
+              ADD_EXIT=$?
+              set -e
+
+              if [ "$ADD_EXIT" -ne 0 ]; then
+                echo "❌ Échec add-record pour $SEARCH_NAME.$SEARCH_ZONE (IP: $SEARCH_PE_IP)"
+                echo "$ADD_OUTPUT"
+              fi
+            fi
 
             SEARCH_A_RECORDS=$(az network private-dns record-set a show \
               --resource-group "$ZONE_RG" \
