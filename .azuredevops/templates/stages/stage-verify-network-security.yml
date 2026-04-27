@@ -270,7 +270,7 @@ stages:
                     --resource-group "$zone_rg" \
                     --zone-name "$zone" \
                     --name "$record_name" \
-                    --query "arecords[].ipv4Address" -o tsv 2>/dev/null || true)
+                    --query "aRecords[].ipv4Address" -o tsv 2>/dev/null || true)
 
                   if [ -z "$record_ips" ]; then
                     echo "❌ Enregistrement A manquant: $record_name.$zone ($label)"

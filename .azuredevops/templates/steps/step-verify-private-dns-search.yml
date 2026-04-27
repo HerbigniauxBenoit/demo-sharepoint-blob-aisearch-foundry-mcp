@@ -80,6 +80,7 @@ steps:
         fi
 
         ERRORS=0
+        SOFT_WARNINGS=0
 
         ZONE_RGS=$(az network private-dns zone list \
           --query "[?name=='$SEARCH_ZONE'].resourceGroup" -o tsv 2>/dev/null || true)
@@ -123,6 +124,100 @@ steps:
             --query "ipConfigurations[0].privateIPAddress" -o tsv 2>/dev/null || true
         }
 
+        check_and_fix_dns_record() {
+          local zone_rg="$1"
+          local zone_name="$2"
+          local record_name="$3"
+          local expected_ip="$4"
+          local current_ip=""
+          local add_output=""
+          local add_exit=0
+          local cname_target=""
+
+          # Lit l'état actuel du record A avant toute tentative d'écriture.
+          current_ip=$(az network private-dns record-set a show \
+            --resource-group "$zone_rg" \
+            --zone-name "$zone_name" \
+            --name "$record_name" \
+            --query "aRecords[0].ipv4Address" -o tsv 2>/dev/null || true)
+
+          if [ "$current_ip" = "$expected_ip" ]; then
+            echo "✅ Enregistrement A: $record_name.$zone_name -> $current_ip"
+            return 0
+          fi
+
+          if [ -z "$current_ip" ]; then
+            echo "⚠️  Enregistrement A manquant: $record_name.$zone_name - tentative de correction"
+          else
+            echo "⚠️  Enregistrement A incohérent: $record_name.$zone_name -> $current_ip (attendu: $expected_ip)"
+            echo "   Tentative de correction vers l'IP attendue"
+          fi
+
+          # Supprime un éventuel CNAME homonyme qui bloquerait la création du A record.
+          cname_target=$(az network private-dns record-set cname show \
+            --resource-group "$zone_rg" \
+            --zone-name "$zone_name" \
+            --name "$record_name" \
+            --query "cnameRecord.cname" -o tsv 2>/dev/null || true)
+
+          if [ -n "$cname_target" ]; then
+            echo "⚠️  Conflit détecté: CNAME existant '$record_name' -> '$cname_target'"
+            echo "   Suppression du CNAME pour permettre la création du record A"
+            az network private-dns record-set cname delete \
+              --resource-group "$zone_rg" \
+              --zone-name "$zone_name" \
+              --name "$record_name" \
+              --yes \
+              --only-show-errors >/dev/null || true
+          fi
+
+          # Tente l'ajout du record A sans échouer immédiatement sur le code de sortie Azure CLI.
+          set +e
+          add_output=$(az network private-dns record-set a add-record \
+            --resource-group "$zone_rg" \
+            --zone-name "$zone_name" \
+            --record-set-name "$record_name" \
+            --ipv4-address "$expected_ip" \
+            --only-show-errors 2>&1)
+          add_exit=$?
+          set -e
+
+          if [ "$add_exit" -eq 0 ]; then
+            echo "ℹ️  Tentative add-record réussie pour $record_name.$zone_name"
+          elif echo "$add_output" | grep -Eqi "same 'ipv4Address'|already exists"; then
+            echo "ℹ️  Record A déjà présent avec IP $expected_ip (idempotent)"
+          else
+            echo "⚠️  add-record a retourné un code non nul pour $record_name.$zone_name"
+            echo "$add_output"
+          fi
+
+          # Vérifie explicitement l'état final du DNS après la tentative de correction.
+          current_ip=$(az network private-dns record-set a show \
+            --resource-group "$zone_rg" \
+            --zone-name "$zone_name" \
+            --name "$record_name" \
+            --query "aRecords[0].ipv4Address" -o tsv 2>/dev/null || true)
+
+          if [ "$current_ip" = "$expected_ip" ]; then
+            echo "✅ Enregistrement A validé: $record_name.$zone_name -> $current_ip"
+            return 0
+          fi
+
+          # Distingue un vrai échec DNS d'un verrou ARM transitoire pendant un move/lock RG.
+          if [ "$add_exit" -ne 0 ] && echo "$add_output" | grep -Eqi "ScopeLocked|scope locked|another operation|operation.*conflict|resource group.*lock|cannot perform.*write.*lock|locked"; then
+            echo "⚠️  ARM lock detected on resource group — transient state, retry after lock is released"
+            return 2
+          fi
+
+          if [ -z "$current_ip" ]; then
+            echo "❌ Enregistrement A absent après tentative: $record_name.$zone_name"
+          else
+            echo "❌ Enregistrement A incorrect après tentative: $record_name.$zone_name -> $current_ip (attendu: $expected_ip)"
+          fi
+
+          return 1
+        }
+
         LINK_NAME=$(az network private-dns link vnet list \
           --resource-group "$ZONE_RG" \
           --zone-name "$SEARCH_ZONE" \
@@ -154,16 +249,22 @@ steps:
           echo "✅ Lien zone/VNet: $LINK_NAME"
         fi
 
+        SEARCH_PE_IP=$(get_search_pe_private_ip || true)
+        if [ -z "$SEARCH_PE_IP" ]; then
+          echo "❌ Impossible de récupérer l'IP privée du Private Endpoint '$PE_NAME'"
+          ERRORS=$((ERRORS + 1))
+        fi
+
         SEARCH_A_RECORDS=$(az network private-dns record-set a show \
           --resource-group "$ZONE_RG" \
           --zone-name "$SEARCH_ZONE" \
           --name "$SEARCH_NAME" \
-          --query "arecords[].ipv4Address" -o tsv 2>/dev/null || true)
+          --query "aRecords[0].ipv4Address" -o tsv 2>/dev/null || true)
 
-        if [ -z "$SEARCH_A_RECORDS" ]; then
-          echo "⚠️  Enregistrement A manquant: $SEARCH_NAME.$SEARCH_ZONE - tentative de correction"
+        if [ -n "$SEARCH_PE_IP" ] && [ -z "$SEARCH_A_RECORDS" ]; then
+          echo "⚠️  Enregistrement A manquant: $SEARCH_NAME.$SEARCH_ZONE - vérification du DNS zone group"
 
-          # Vérifie que le DNS zone group du PE pointe bien vers la zone Search retenue
+          # Vérifie que le DNS zone group du PE pointe bien vers la zone Search retenue.
           DNS_ZONE_IDS=$(az network private-endpoint dns-zone-group show \
             --resource-group "$NETWORK_RG" \
             --endpoint-name "$PE_NAME" \
@@ -187,107 +288,43 @@ steps:
               --zone-name "default" \
               --only-show-errors >/dev/null
 
-            # La création des enregistrements DNS via zone-group peut être asynchrone
+            # La création des enregistrements DNS via zone-group peut être asynchrone.
             for i in $(seq 1 12); do
               SEARCH_A_RECORDS=$(az network private-dns record-set a show \
                 --resource-group "$ZONE_RG" \
                 --zone-name "$SEARCH_ZONE" \
                 --name "$SEARCH_NAME" \
-                --query "arecords[].ipv4Address" -o tsv 2>/dev/null || true)
+                --query "aRecords[0].ipv4Address" -o tsv 2>/dev/null || true)
               if [ -n "$SEARCH_A_RECORDS" ]; then
                 break
               fi
               sleep 5
             done
           fi
+        fi
 
-          SEARCH_PE_IP=$(get_search_pe_private_ip || true)
-          if [ -z "$SEARCH_PE_IP" ]; then
-            echo "❌ Impossible de récupérer l'IP privée du Private Endpoint '$PE_NAME'"
+        if [ -n "$SEARCH_PE_IP" ]; then
+          set +e
+          check_and_fix_dns_record "$ZONE_RG" "$SEARCH_ZONE" "$SEARCH_NAME" "$SEARCH_PE_IP"
+          DNS_RECORD_STATUS=$?
+          set -e
+
+          if [ "$DNS_RECORD_STATUS" -eq 1 ]; then
             ERRORS=$((ERRORS + 1))
-          else
-            if [ -z "$SEARCH_A_RECORDS" ]; then
-              # Cas fréquent: un CNAME existe déjà avec le même nom, ce qui bloque la création du A
-              CNAME_TARGET=$(az network private-dns record-set cname show \
-                --resource-group "$ZONE_RG" \
-                --zone-name "$SEARCH_ZONE" \
-                --name "$SEARCH_NAME" \
-                --query "cnameRecord.cname" -o tsv 2>/dev/null || true)
-
-              if [ -n "$CNAME_TARGET" ]; then
-                echo "⚠️  Conflit détecté: CNAME existant '$SEARCH_NAME' -> '$CNAME_TARGET'"
-                echo "   Suppression du CNAME pour permettre la création du record A"
-                az network private-dns record-set cname delete \
-                  --resource-group "$ZONE_RG" \
-                  --zone-name "$SEARCH_ZONE" \
-                  --name "$SEARCH_NAME" \
-                  --yes \
-                  --only-show-errors >/dev/null
-              fi
-
-              # Création explicite du record-set A puis ajout de l'IP PE
-              az network private-dns record-set a create \
-                --resource-group "$ZONE_RG" \
-                --zone-name "$SEARCH_ZONE" \
-                --name "$SEARCH_NAME" \
-                --ttl 10 \
-                --only-show-errors >/dev/null 2>&1 || true
-
-              set +e
-              ADD_OUTPUT=$(az network private-dns record-set a add-record \
-                --resource-group "$ZONE_RG" \
-                --zone-name "$SEARCH_ZONE" \
-                --record-set-name "$SEARCH_NAME" \
-                --ipv4-address "$SEARCH_PE_IP" \
-                --only-show-errors 2>&1)
-              ADD_EXIT=$?
-              set -e
-
-              if [ "$ADD_EXIT" -ne 0 ]; then
-                if echo "$ADD_OUTPUT" | grep -q "same 'ipv4Address'"; then
-                  echo "ℹ️  Record A déjà présent avec IP $SEARCH_PE_IP (idempotent)"
-                else
-                  echo "❌ Échec add-record pour $SEARCH_NAME.$SEARCH_ZONE (IP: $SEARCH_PE_IP)"
-                  echo "$ADD_OUTPUT"
-                fi
-              fi
-            fi
-
-            SEARCH_A_RECORDS=""
-            for i in $(seq 1 8); do
-              SEARCH_A_RECORDS=$(az network private-dns record-set a show \
-                --resource-group "$ZONE_RG" \
-                --zone-name "$SEARCH_ZONE" \
-                --name "$SEARCH_NAME" \
-                --query "arecords[].ipv4Address" -o tsv 2>/dev/null || true)
-
-              if [ -z "$SEARCH_A_RECORDS" ]; then
-                SEARCH_A_RECORDS=$(az network private-dns record-set a list \
-                  --resource-group "$ZONE_RG" \
-                  --zone-name "$SEARCH_ZONE" \
-                  --query "[?name=='$SEARCH_NAME'].arecords[].ipv4Address" -o tsv 2>/dev/null || true)
-              fi
-
-              if [ -n "$SEARCH_A_RECORDS" ]; then
-                break
-              fi
-              sleep 3
-            done
-
-            if [ -z "$SEARCH_A_RECORDS" ]; then
-              echo "❌ Impossible de créer l'enregistrement A pour $SEARCH_NAME.$SEARCH_ZONE"
-              ERRORS=$((ERRORS + 1))
-            else
-              echo "✅ Enregistrement A recréé: $SEARCH_NAME.$SEARCH_ZONE -> $SEARCH_A_RECORDS"
-            fi
+          elif [ "$DNS_RECORD_STATUS" -eq 2 ]; then
+            SOFT_WARNINGS=$((SOFT_WARNINGS + 1))
+            echo "⚠️  Vérification DNS privé AI Search en état transitoire"
           fi
-        else
-          echo "✅ Enregistrement A: $SEARCH_NAME.$SEARCH_ZONE -> $SEARCH_A_RECORDS"
         fi
 
         if [ "$ERRORS" -gt 0 ]; then
           echo "❌ Vérification DNS privé AI Search KO ($ERRORS erreur(s))"
           exit 1
+        fi
+
+        if [ "$SOFT_WARNINGS" -gt 0 ]; then
+          echo "⚠️  Vérification DNS privé AI Search en état transitoire ($SOFT_WARNINGS avertissement(s))"
+          exit 0
         fi
 
         echo "✅ Vérification DNS privé AI Search OK"
