@@ -25,6 +25,8 @@ steps:
       scriptType: 'bash'
       scriptLocation: 'inlineScript'
       inlineScript: |
+        set -euo pipefail
+
         echo "================================================"
         echo "    CRÉATION DE L'INDEXER                       "
         echo "================================================"
@@ -115,43 +117,84 @@ steps:
         echo "Endpoint AI Search utilisé: $SEARCH_URL"
         
         echo "Création de l'indexer '${{ parameters.indexerName }}'..."
+
+        CURL_EXIT=0
+        INDEX_RESPONSE=$(curl -s -w "\n%{http_code}" \
+          "${CURL_SEARCH_EXTRA_ARGS[@]}" \
+          -X GET "$SEARCH_URL/indexes/${{ parameters.indexName }}?api-version=2024-07-01" \
+          -H "api-key: $SEARCH_KEY") || CURL_EXIT=$?
+
+        if [ "$CURL_EXIT" -ne 0 ]; then
+          echo "❌ curl a échoué (exit code $CURL_EXIT) pendant la lecture de l'index"
+          print_search_network_diagnostics "$SEARCH_HOST"
+          exit "$CURL_EXIT"
+        fi
+
+        INDEX_BODY=$(echo "$INDEX_RESPONSE" | head -n -1)
+        INDEX_STATUS=$(echo "$INDEX_RESPONSE" | tail -n 1)
+
+        if [ "$INDEX_STATUS" != "200" ]; then
+          echo "❌ Impossible de lire l'index '${{ parameters.indexName }}' (HTTP $INDEX_STATUS)"
+          echo "   Détail: $INDEX_BODY"
+          exit 1
+        fi
+
+        if echo "$INDEX_BODY" | grep -Eq '"name"[[:space:]]*:[[:space:]]*"id"'; then
+          TARGET_KEY_FIELD="id"
+        elif echo "$INDEX_BODY" | grep -Eq '"name"[[:space:]]*:[[:space:]]*"chunk_id"'; then
+          TARGET_KEY_FIELD="chunk_id"
+        else
+          echo "❌ Aucun champ clé compatible détecté dans l'index (attendu: id ou chunk_id)."
+          exit 1
+        fi
+
+        echo "Champ clé détecté pour le mapping: $TARGET_KEY_FIELD"
+
+        PAYLOAD=$(cat <<EOF
+        {
+          "name": "${{ parameters.indexerName }}",
+          "dataSourceName": "${{ parameters.dataSourceName }}",
+          "targetIndexName": "${{ parameters.indexName }}",
+          "schedule": {"interval": "PT1H"},
+          "parameters": {
+            "configuration": {
+              "dataToExtract": "contentAndMetadata",
+              "parsingMode": "default"
+            }
+          },
+          "fieldMappings": [
+            {
+              "sourceFieldName": "metadata_storage_path",
+              "targetFieldName": "$TARGET_KEY_FIELD",
+              "mappingFunction": {"name": "base64Encode"}
+            }
+          ]
+        }
+        EOF
+        )
         
         CURL_EXIT=0
-        HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
+        HTTP_RESPONSE=$(curl -s -w "\n%{http_code}" \
           "${CURL_SEARCH_EXTRA_ARGS[@]}" \
           -X PUT "$SEARCH_URL/indexers/${{ parameters.indexerName }}?api-version=2024-07-01" \
           -H "Content-Type: application/json" \
           -H "api-key: $SEARCH_KEY" \
-          -d '{
-            "name": "${{ parameters.indexerName }}",
-            "dataSourceName": "${{ parameters.dataSourceName }}",
-            "targetIndexName": "${{ parameters.indexName }}",
-            "schedule": {"interval": "PT1H"},
-            "parameters": {
-              "configuration": {
-                "dataToExtract": "contentAndMetadata",
-                "parsingMode": "default"
-              }
-            },
-            "fieldMappings": [
-              {
-                "sourceFieldName": "metadata_storage_path",
-                "targetFieldName": "id",
-                "mappingFunction": {"name": "base64Encode"}
-              }
-            ]
-          }') || CURL_EXIT=$?
+          -d "$PAYLOAD") || CURL_EXIT=$?
 
         if [ "$CURL_EXIT" -ne 0 ]; then
           echo "❌ curl a échoué (exit code $CURL_EXIT) pendant la création de l'indexer"
           print_search_network_diagnostics "$SEARCH_HOST"
           exit "$CURL_EXIT"
         fi
+
+        HTTP_BODY=$(echo "$HTTP_RESPONSE" | head -n -1)
+        HTTP_STATUS=$(echo "$HTTP_RESPONSE" | tail -n 1)
         
         if [ "$HTTP_STATUS" == "201" ] || [ "$HTTP_STATUS" == "204" ]; then
           echo "✅ Indexer créé/mis à jour"
         else
           echo "❌ Erreur lors de la création de l'indexer (HTTP $HTTP_STATUS)"
+          echo "   Détail: $HTTP_BODY"
           exit 1
         fi
         
