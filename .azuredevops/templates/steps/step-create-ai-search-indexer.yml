@@ -192,6 +192,8 @@ steps:
             --only-show-errors >/dev/null
 
           echo "✅ Rôle Storage Blob Data Reader assigné"
+          echo "Attente de propagation RBAC (30s)..."
+          sleep 30
         fi
         
         echo "Création de l'indexer '${{ parameters.indexerName }}'..."
@@ -251,27 +253,48 @@ steps:
         EOF
         )
         
-        CURL_EXIT=0
-        HTTP_RESPONSE=$(curl -s -w "\n%{http_code}" \
-          "${CURL_SEARCH_EXTRA_ARGS[@]}" \
-          -X PUT "$SEARCH_URL/indexers/${{ parameters.indexerName }}?api-version=2024-07-01" \
-          -H "Content-Type: application/json" \
-          -H "api-key: $SEARCH_KEY" \
-          -d "$PAYLOAD") || CURL_EXIT=$?
+        INDEXER_RETRYABLE_ERROR="Unable to retrieve blob container for account"
+        MAX_INDEXER_ATTEMPTS=4
+        INDEXER_CREATED=false
 
-        if [ "$CURL_EXIT" -ne 0 ]; then
-          echo "❌ curl a échoué (exit code $CURL_EXIT) pendant la création de l'indexer"
-          print_search_network_diagnostics "$SEARCH_HOST"
-          exit "$CURL_EXIT"
-        fi
+        for attempt in $(seq 1 "$MAX_INDEXER_ATTEMPTS"); do
+          CURL_EXIT=0
+          HTTP_RESPONSE=$(curl -s -w "\n%{http_code}" \
+            "${CURL_SEARCH_EXTRA_ARGS[@]}" \
+            -X PUT "$SEARCH_URL/indexers/${{ parameters.indexerName }}?api-version=2024-07-01" \
+            -H "Content-Type: application/json" \
+            -H "api-key: $SEARCH_KEY" \
+            -d "$PAYLOAD") || CURL_EXIT=$?
 
-        HTTP_BODY=$(echo "$HTTP_RESPONSE" | head -n -1)
-        HTTP_STATUS=$(echo "$HTTP_RESPONSE" | tail -n 1)
-        
-        if [ "$HTTP_STATUS" == "201" ] || [ "$HTTP_STATUS" == "204" ]; then
-          echo "✅ Indexer créé/mis à jour"
-        else
+          if [ "$CURL_EXIT" -ne 0 ]; then
+            echo "❌ curl a échoué (exit code $CURL_EXIT) pendant la création de l'indexer"
+            print_search_network_diagnostics "$SEARCH_HOST"
+            exit "$CURL_EXIT"
+          fi
+
+          HTTP_BODY=$(echo "$HTTP_RESPONSE" | head -n -1)
+          HTTP_STATUS=$(echo "$HTTP_RESPONSE" | tail -n 1)
+
+          if [ "$HTTP_STATUS" == "201" ] || [ "$HTTP_STATUS" == "204" ]; then
+            echo "✅ Indexer créé/mis à jour"
+            INDEXER_CREATED=true
+            break
+          fi
+
+          if [ "$HTTP_STATUS" == "404" ] && echo "$HTTP_BODY" | grep -Fq "$INDEXER_RETRYABLE_ERROR" && [ "$attempt" -lt "$MAX_INDEXER_ATTEMPTS" ]; then
+            echo "⚠️  AI Search ne voit pas encore le container Blob via l'identité managée (tentative $attempt/$MAX_INDEXER_ATTEMPTS)."
+            echo "   Attente de propagation RBAC supplémentaire (20s) avant retry..."
+            sleep 20
+            continue
+          fi
+
           echo "❌ Erreur lors de la création de l'indexer (HTTP $HTTP_STATUS)"
+          echo "   Détail: $HTTP_BODY"
+          exit 1
+        done
+
+        if [ "$INDEXER_CREATED" != "true" ]; then
+          echo "❌ Erreur lors de la création de l'indexer après $MAX_INDEXER_ATTEMPTS tentatives"
           echo "   Détail: $HTTP_BODY"
           exit 1
         fi
