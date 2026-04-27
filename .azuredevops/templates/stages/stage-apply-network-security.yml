@@ -313,7 +313,6 @@ stages:
                         --resource-group "$NETWORK_RG" \
                         --endpoint-name "$pe_name" \
                         --name "default" \
-                        --yes \
                         --only-show-errors >/dev/null
                       az network private-endpoint dns-zone-group create \
                         --resource-group "$NETWORK_RG" \
