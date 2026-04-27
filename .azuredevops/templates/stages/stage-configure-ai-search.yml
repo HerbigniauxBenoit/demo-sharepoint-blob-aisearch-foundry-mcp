@@ -6,6 +6,10 @@ parameters:
     type: string
   - name: resourceGroupName
     type: string
+  - name: networkResourceGroupName
+    type: string
+  - name: privateDnsResourceGroupName
+    type: string
   - name: aiSearchName
     type: string
   - name: storageAccountName
@@ -40,6 +44,8 @@ stages:
             parameters:
               azureSubscription: ${{ parameters.azureSubscription }}
               resourceGroupName: ${{ parameters.resourceGroupName }}
+              networkResourceGroupName: ${{ parameters.networkResourceGroupName }}
+              privateDnsResourceGroupName: ${{ parameters.privateDnsResourceGroupName }}
               environment: ${{ parameters.environment }}
               aiSearchName: ${{ parameters.aiSearchName }}
 
@@ -47,6 +53,7 @@ stages:
             parameters:
               azureSubscription: ${{ parameters.azureSubscription }}
               resourceGroupName: ${{ parameters.resourceGroupName }}
+              networkResourceGroupName: ${{ parameters.networkResourceGroupName }}
               aiSearchName: ${{ parameters.aiSearchName }}
               storageAccountName: ${{ parameters.storageAccountName }}
               dataSourceName: ${{ parameters.dataSourceName }}
@@ -63,6 +70,7 @@ stages:
             parameters:
               azureSubscription: ${{ parameters.azureSubscription }}
               resourceGroupName: ${{ parameters.resourceGroupName }}
+              networkResourceGroupName: ${{ parameters.networkResourceGroupName }}
               aiSearchName: ${{ parameters.aiSearchName }}
               indexName: ${{ parameters.indexName }}
 
@@ -76,6 +84,7 @@ stages:
             parameters:
               azureSubscription: ${{ parameters.azureSubscription }}
               resourceGroupName: ${{ parameters.resourceGroupName }}
+              networkResourceGroupName: ${{ parameters.networkResourceGroupName }}
               aiSearchName: ${{ parameters.aiSearchName }}
               indexerName: ${{ parameters.indexerName }}
               dataSourceName: ${{ parameters.dataSourceName }}

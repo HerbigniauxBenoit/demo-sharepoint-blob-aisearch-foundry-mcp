@@ -8,6 +8,12 @@ parameters:
     type: string
   - name: resourceGroupName
     type: string
+  - name: networkResourceGroupName
+    type: string
+    default: ''
+  - name: privateDnsResourceGroupName
+    type: string
+    default: ''
   - name: environment
     type: string
   - name: storageAccountName
@@ -40,7 +46,14 @@ stages:
                 set -euo pipefail
 
                 RG="${{ parameters.resourceGroupName }}"
-                LOC="${{ parameters.environment }}"
+                NETWORK_RG="${{ parameters.networkResourceGroupName }}"
+                DNS_RG="${{ parameters.privateDnsResourceGroupName }}"
+                if [ -z "$NETWORK_RG" ]; then
+                  NETWORK_RG="$RG"
+                fi
+                if [ -z "$DNS_RG" ]; then
+                  DNS_RG="$NETWORK_RG"
+                fi
                 SUBNET_NAME="snet-companion-private-endpoints"
                 case "${{ parameters.environment }}" in
                   dev)  VNET_NAME="vnet-gptrusted-dev"  ;;
@@ -52,22 +65,34 @@ stages:
                 VNET_COUNT=$(az network vnet list \
                   --query "length([?name=='$VNET_NAME'])" -o tsv)
 
-                if [ "$VNET_COUNT" -eq 1 ]; then
-                  VNET_RG=$(az network vnet list \
-                    --query "[?name=='$VNET_NAME']|[0].resourceGroup" -o tsv)
-                else
-                  VNET_RG="$RG"
+                if [ "$VNET_COUNT" -eq 0 ]; then
+                  echo "❌ VNet '$VNET_NAME' introuvable dans l'abonnement courant"
+                  exit 1
                 fi
+
+                if [ "$VNET_COUNT" -gt 1 ]; then
+                  echo "❌ Plusieurs VNets nommés '$VNET_NAME' trouvés dans l'abonnement courant"
+                  exit 1
+                fi
+
+                VNET_RG=$(az network vnet list \
+                  --query "[?name=='$VNET_NAME']|[0].resourceGroup" -o tsv)
                 STORAGE_NAME="${{ parameters.storageAccountName }}"
                 SEARCH_NAME="${{ parameters.aiSearchName }}"
                 ACR_NAME="${{ parameters.acrName }}"
                 SUBSCRIPTION_ID=$(az account show --query id -o tsv)
                 VNET_ID="/subscriptions/$SUBSCRIPTION_ID/resourceGroups/$VNET_RG/providers/Microsoft.Network/virtualNetworks/$VNET_NAME"
+                ACR_SKU=$(az acr show \
+                  --name "$ACR_NAME" \
+                  --resource-group "$RG" \
+                  --query sku.name -o tsv 2>/dev/null || echo "unknown")
 
                 echo "============================================================"
                 echo "        VÉRIFICATION DURCISSEMENT RÉSEAU PARTAGÉ"
                 echo "============================================================"
-                echo "Ressource Group  : $RG"
+                echo "Ressource Group (app): $RG"
+                echo "Ressource Group (PE) : $NETWORK_RG"
+                echo "Ressource Group (DNS): $DNS_RG"
                 echo "VNet             : $VNET_NAME (RG: $VNET_RG)"
                 echo "Subnet PE        : $SUBNET_NAME"
                 echo "Storage Account  : $STORAGE_NAME"
@@ -92,6 +117,19 @@ stages:
                   --vnet-name "$VNET_NAME" \
                   --name "$SUBNET_NAME" >/dev/null 2>&1; then
                   echo "✅ Subnet présent: $SUBNET_NAME"
+
+                  SUBNET_POLICIES=$(az network vnet subnet show \
+                    --resource-group "$VNET_RG" \
+                    --vnet-name "$VNET_NAME" \
+                    --name "$SUBNET_NAME" \
+                    --query privateEndpointNetworkPolicies -o tsv 2>/dev/null || echo "unknown")
+
+                  if [ "$SUBNET_POLICIES" = "Disabled" ]; then
+                    echo "✅ Subnet policy private endpoint: Disabled"
+                  else
+                    echo "❌ Subnet policy private endpoint incorrecte: $SUBNET_POLICIES (attendu: Disabled)"
+                    ERRORS=$((ERRORS + 1))
+                  fi
                 else
                   echo "❌ Subnet ABSENT: $SUBNET_NAME"
                   ERRORS=$((ERRORS + 1))
@@ -109,7 +147,8 @@ stages:
                 if [ "$STORAGE_PNA" = "Disabled" ]; then
                   echo "✅ Storage accès public fermé"
                 else
-                  echo "⚠️  Storage publicNetworkAccess: $STORAGE_PNA (attendu: Disabled)"
+                  echo "❌ Storage publicNetworkAccess: $STORAGE_PNA (attendu: Disabled)"
+                  ERRORS=$((ERRORS + 1))
                 fi
 
                 # Vérifier AI Search
@@ -121,7 +160,8 @@ stages:
                 if [ "$SEARCH_PNA" = "disabled" ]; then
                   echo "✅ AI Search accès public fermé"
                 else
-                  echo "⚠️  AI Search publicNetworkAccess: $SEARCH_PNA (attendu: disabled)"
+                  echo "❌ AI Search publicNetworkAccess: $SEARCH_PNA (attendu: disabled)"
+                  ERRORS=$((ERRORS + 1))
                 fi
 
                 # Vérifier ACR
@@ -130,12 +170,13 @@ stages:
                   --resource-group "$RG" \
                   --query publicNetworkAccess -o tsv 2>/dev/null || echo "unknown")
 
-                if [ "$ACR_PUBLIC" = "disabled" ]; then
+                if [ "$ACR_SKU" = "Premium" ] && [ "$ACR_PUBLIC" = "disabled" ]; then
                   echo "✅ ACR accès public fermé (Premium)"
-                elif [ "$ACR_PUBLIC" = "Enabled" ]; then
-                  echo "⚠️  ACR accès public ACTIF (SKU non-Premium accepté)"
+                elif [ "$ACR_SKU" = "Premium" ]; then
+                  echo "❌ ACR publicNetworkAccess: $ACR_PUBLIC (attendu: disabled pour Premium)"
+                  ERRORS=$((ERRORS + 1))
                 else
-                  echo "⚠️  ACR publicNetworkAccess: $ACR_PUBLIC"
+                  echo "ℹ️  ACR non-Premium ($ACR_SKU): accès public toléré ($ACR_PUBLIC)"
                 fi
 
                 echo ""
@@ -143,35 +184,33 @@ stages:
 
                 # Vérifier Storage PE
                 if az network private-endpoint show \
-                  --resource-group "$RG" \
+                  --resource-group "$NETWORK_RG" \
                   --name "pe-${STORAGE_NAME}-blob" >/dev/null 2>&1; then
                   echo "✅ Private Endpoint Storage présent"
                 else
-                  echo "⚠️  Private Endpoint Storage absent (optionnel si accès public encore actif)"
+                  echo "❌ Private Endpoint Storage absent"
+                  ERRORS=$((ERRORS + 1))
                 fi
 
                 # Vérifier AI Search PE
                 if az network private-endpoint show \
-                  --resource-group "$RG" \
+                  --resource-group "$NETWORK_RG" \
                   --name "pe-${SEARCH_NAME}-search" >/dev/null 2>&1; then
                   echo "✅ Private Endpoint AI Search présent"
                 else
-                  echo "⚠️  Private Endpoint AI Search absent (optionnel si accès public encore actif)"
+                  echo "❌ Private Endpoint AI Search absent"
+                  ERRORS=$((ERRORS + 1))
                 fi
 
                 # Vérifier ACR PE (si Premium)
-                ACR_SKU=$(az acr show \
-                  --name "$ACR_NAME" \
-                  --resource-group "$RG" \
-                  --query sku.name -o tsv 2>/dev/null || echo "unknown")
-
                 if [ "$ACR_SKU" = "Premium" ]; then
                   if az network private-endpoint show \
-                    --resource-group "$RG" \
+                    --resource-group "$NETWORK_RG" \
                     --name "pe-${ACR_NAME}-registry" >/dev/null 2>&1; then
                     echo "✅ Private Endpoint ACR présent (Premium)"
                   else
-                    echo "⚠️  Private Endpoint ACR absent (Premium activé)"
+                    echo "❌ Private Endpoint ACR absent (Premium activé)"
+                    ERRORS=$((ERRORS + 1))
                   fi
                 else
                   echo "ℹ️  ACR non-Premium ($ACR_SKU): Private Endpoint non applicable"
@@ -200,10 +239,20 @@ stages:
                   fi
 
                   if [ "$(echo "$zone_rgs" | sed '/^$/d' | wc -l | tr -d ' ')" -gt 1 ]; then
-                    echo "⚠️  Plusieurs zones privées détectées pour '$zone'"
+                    if echo "$zone_rgs" | grep -Fxq "$DNS_RG"; then
+                      zone_rg="$DNS_RG"
+                      echo "⚠️  Plusieurs zones privées détectées pour '$zone' (zone retenue: $zone_rg)"
+                    else
+                      echo "❌ Plusieurs zones privées détectées pour '$zone' sans zone dans le RG DNS attendu '$DNS_RG'"
+                      echo "$zone_rgs"
+                      ERRORS=$((ERRORS + 1))
+                      return
+                    fi
                   fi
 
-                  zone_rg=$(echo "$zone_rgs" | head -n 1)
+                  if [ -z "$zone_rg" ]; then
+                    zone_rg=$(echo "$zone_rgs" | head -n 1)
+                  fi
 
                   linked=$(az network private-dns link vnet list \
                     --resource-group "$zone_rg" \

@@ -57,7 +57,7 @@ parameters:
   - name: allowSecurity
     displayName: '🔐 Vérifier le durcissement réseau (dépend de allowSecurity infra)'
     type: boolean
-    default: false
+    default: true
 
 # -----------------------------------------------------------------------------
 # Variables
@@ -65,6 +65,8 @@ parameters:
 variables:
   # Ressources partagées
   sharedResourceGroupName: 'rg-companion-${{ parameters.environment }}'
+  networkResourceGroupName: 'rg-gptrusted-${{ parameters.environment }}'
+  privateDnsResourceGroupName: 'rg-gptrusted-${{ parameters.environment }}'
   storageAccountName: 'stcompanionshared${{ parameters.environment }}'
   aiSearchName: 'srch-companion-shared-${{ parameters.environment }}'
   containerAppsEnvName: 'cae-companion-shared-${{ parameters.environment }}'
@@ -81,9 +83,6 @@ variables:
   # ACR
   acrName: 'acrcompanion${{ parameters.environment }}'
   imageName: 'sharepoint-sync'
-
-  # Réseau
-  privateEndpointSubnetName: 'snet-companion-private-endpoints'
 
   # Service Connection
   azureSubscription: 'SVC_GPTrusted_${{ upper(parameters.environment) }}'
@@ -143,6 +142,8 @@ stages:
       azureSubscription: $(azureSubscription)
       environment: ${{ parameters.environment }}
       resourceGroupName: $(sharedResourceGroupName)
+      networkResourceGroupName: $(networkResourceGroupName)
+      privateDnsResourceGroupName: $(privateDnsResourceGroupName)
       aiSearchName: $(aiSearchName)
       storageAccountName: $(storageAccountName)
       dataSourceName: $(aiSearchDataSourceName)
@@ -167,7 +168,22 @@ stages:
         - CreateManagedIdentity
         - CreateBlobContainer
 
-  # Stage 6 : Déployer Container App
+  # Stage 6 : Vérifier durcissement réseau partagé (optionnel)
+  - ${{ if eq(parameters.allowSecurity, true) }}:
+    - template: templates/stages/stage-verify-network-security.yml
+      parameters:
+        azureSubscription: $(azureSubscription)
+        resourceGroupName: $(sharedResourceGroupName)
+        networkResourceGroupName: $(networkResourceGroupName)
+        privateDnsResourceGroupName: $(privateDnsResourceGroupName)
+        environment: ${{ parameters.environment }}
+        storageAccountName: $(storageAccountName)
+        aiSearchName: $(aiSearchName)
+        acrName: $(acrName)
+        dependsOn:
+          - Validation
+
+  # Stage 7 : Déployer Container App
   - template: templates/stages/stage-deploy-container-app.yml
     parameters:
       azureSubscription: $(azureSubscription)
@@ -190,6 +206,8 @@ stages:
         - Validation
         - AssignRBAC
         - ConfigureAISearch
+        - ${{ if eq(parameters.allowSecurity, true) }}:
+          - VerifyNetworkSecurity
 
   # Stage 8 : Sécurité du compagnon (optionnel)
   - ${{ if eq(parameters.allowSecurity, true) }}:
@@ -197,6 +215,7 @@ stages:
       parameters:
         azureSubscription: $(azureSubscription)
         resourceGroupName: $(sharedResourceGroupName)
+        networkResourceGroupName: $(networkResourceGroupName)
         environment: ${{ parameters.environment }}
         companionName: ${{ parameters.companionName }}
         storageAccountName: $(storageAccountName)

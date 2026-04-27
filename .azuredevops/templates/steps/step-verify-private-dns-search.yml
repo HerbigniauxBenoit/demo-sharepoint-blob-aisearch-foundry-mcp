@@ -6,6 +6,12 @@ parameters:
     type: string
   - name: resourceGroupName
     type: string
+  - name: networkResourceGroupName
+    type: string
+    default: ''
+  - name: privateDnsResourceGroupName
+    type: string
+    default: ''
   - name: environment
     type: string
   - name: aiSearchName
@@ -22,6 +28,14 @@ steps:
         set -euo pipefail
 
         RG="${{ parameters.resourceGroupName }}"
+        NETWORK_RG="${{ parameters.networkResourceGroupName }}"
+        DNS_RG="${{ parameters.privateDnsResourceGroupName }}"
+        if [ -z "$NETWORK_RG" ]; then
+          NETWORK_RG="$RG"
+        fi
+        if [ -z "$DNS_RG" ]; then
+          DNS_RG="$NETWORK_RG"
+        fi
         SEARCH_NAME="${{ parameters.aiSearchName }}"
         SEARCH_ZONE="privatelink.search.windows.net"
 
@@ -76,13 +90,17 @@ steps:
         fi
 
         if [ "$(echo "$ZONE_RGS" | sed '/^$/d' | wc -l | tr -d ' ')" -gt 1 ]; then
-          echo "⚠️  Plusieurs zones '$SEARCH_ZONE' détectées:"
-          echo "$ZONE_RGS"
+          if echo "$ZONE_RGS" | grep -Fxq "$DNS_RG"; then
+            ZONE_RG="$DNS_RG"
+            echo "⚠️  Plusieurs zones '$SEARCH_ZONE' détectées. Zone retenue: $ZONE_RG"
+          else
+            echo "❌ Plusieurs zones '$SEARCH_ZONE' détectées sans zone dans le RG DNS attendu '$DNS_RG'"
+            echo "$ZONE_RGS"
+            exit 1
+          fi
         fi
 
-        if echo "$ZONE_RGS" | grep -Fxq "$RG"; then
-          ZONE_RG="$RG"
-        else
+        if [ -z "${ZONE_RG:-}" ]; then
           ZONE_RG=$(echo "$ZONE_RGS" | head -n 1)
         fi
         ZONE_ID="/subscriptions/$SUBSCRIPTION_ID/resourceGroups/$ZONE_RG/providers/Microsoft.Network/privateDnsZones/$SEARCH_ZONE"
@@ -92,7 +110,7 @@ steps:
         get_search_pe_private_ip() {
           local nic_id=""
           nic_id=$(az network private-endpoint show \
-            --resource-group "$RG" \
+            --resource-group "$NETWORK_RG" \
             --name "$PE_NAME" \
             --query "networkInterfaces[0].id" -o tsv 2>/dev/null || true)
 
@@ -147,7 +165,7 @@ steps:
 
           # Vérifie que le DNS zone group du PE pointe bien vers la zone Search retenue
           DNS_ZONE_IDS=$(az network private-endpoint dns-zone-group show \
-            --resource-group "$RG" \
+            --resource-group "$NETWORK_RG" \
             --endpoint-name "$PE_NAME" \
             --name "default" \
             --query "privateDnsZoneConfigs[].privateDnsZoneId" -o tsv 2>/dev/null || true)
@@ -155,14 +173,14 @@ steps:
           if ! echo "$DNS_ZONE_IDS" | grep -Fq "$ZONE_ID"; then
             echo "⚠️  DNS zone group du PE incohérent - recréation"
             az network private-endpoint dns-zone-group delete \
-              --resource-group "$RG" \
+              --resource-group "$NETWORK_RG" \
               --endpoint-name "$PE_NAME" \
               --name "default" \
               --yes \
               --only-show-errors >/dev/null 2>&1 || true
 
             az network private-endpoint dns-zone-group create \
-              --resource-group "$RG" \
+              --resource-group "$NETWORK_RG" \
               --endpoint-name "$PE_NAME" \
               --name "default" \
               --private-dns-zone "$ZONE_ID" \

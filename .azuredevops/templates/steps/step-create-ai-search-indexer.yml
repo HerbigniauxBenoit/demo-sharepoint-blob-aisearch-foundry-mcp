@@ -6,6 +6,8 @@ parameters:
     type: string
   - name: resourceGroupName
     type: string
+  - name: networkResourceGroupName
+    type: string
   - name: aiSearchName
     type: string
   - name: indexerName
@@ -29,6 +31,10 @@ steps:
         echo ""
 
         RG="${{ parameters.resourceGroupName }}"
+        NETWORK_RG="${{ parameters.networkResourceGroupName }}"
+        if [ -z "$NETWORK_RG" ]; then
+          NETWORK_RG="$RG"
+        fi
         SEARCH_NAME="${{ parameters.aiSearchName }}"
         
         SEARCH_KEY=$(az search admin-key show \
@@ -66,7 +72,7 @@ steps:
           local pe_name="pe-${SEARCH_NAME}-search"
           local nic_id=""
           nic_id=$(az network private-endpoint show \
-            --resource-group "$RG" \
+            --resource-group "$NETWORK_RG" \
             --name "$pe_name" \
             --query "networkInterfaces[0].id" -o tsv 2>/dev/null || true)
 

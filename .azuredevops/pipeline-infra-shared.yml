@@ -64,7 +64,7 @@ parameters:
   - name: allowSecurity
     displayName: '🔐 Activer le durcissement réseau en fin de pipeline'
     type: boolean
-    default: false
+    default: true
 
 # -----------------------------------------------------------------------------
 # Variables
@@ -72,6 +72,8 @@ parameters:
 variables:
   # Noms des ressources
   resourceGroupName: 'rg-companion-${{ parameters.environment }}'
+  networkResourceGroupName: 'rg-gptrusted-${{ parameters.environment }}'
+  privateDnsResourceGroupName: 'rg-gptrusted-${{ parameters.environment }}'
   storageAccountName: 'stcompanionshared${{ parameters.environment }}'
   aiSearchName: 'srch-companion-shared-${{ parameters.environment }}'
   containerAppsEnvName: 'cae-companion-shared-${{ parameters.environment }}'
@@ -123,7 +125,8 @@ stages:
               echo "Sécurité activée            : ${{ parameters.allowSecurity }}"
               echo "VNet Private Endpoints      : vnet-gptrusted-${{ parameters.environment }} (existant)"
               echo "Subnet Private Endpoints    : snet-companion-private-endpoints"
-              echo "RG DNS privés               : $(resourceGroupName)"
+              echo "RG Private Endpoints/NIC    : $(networkResourceGroupName)"
+              echo "RG DNS privés               : $(privateDnsResourceGroupName)"
               echo ""
             displayName: '📋 Afficher les paramètres'
 
@@ -213,6 +216,8 @@ stages:
       parameters:
         azureSubscription: $(azureSubscription)
         resourceGroupName: $(resourceGroupName)
+        networkResourceGroupName: $(networkResourceGroupName)
+        privateDnsResourceGroupName: $(privateDnsResourceGroupName)
         location: ${{ parameters.location }}
         environment: ${{ parameters.environment }}
         storageAccountName: $(storageAccountName)

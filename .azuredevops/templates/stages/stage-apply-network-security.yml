@@ -6,6 +6,12 @@ parameters:
     type: string
   - name: resourceGroupName
     type: string
+  - name: networkResourceGroupName
+    type: string
+    default: ''
+  - name: privateDnsResourceGroupName
+    type: string
+    default: ''
   - name: location
     type: string
   - name: environment
@@ -40,6 +46,14 @@ stages:
                 set -euo pipefail
 
                 RG="${{ parameters.resourceGroupName }}"
+                NETWORK_RG="${{ parameters.networkResourceGroupName }}"
+                DNS_RG="${{ parameters.privateDnsResourceGroupName }}"
+                if [ -z "$NETWORK_RG" ]; then
+                  NETWORK_RG="$RG"
+                fi
+                if [ -z "$DNS_RG" ]; then
+                  DNS_RG="$NETWORK_RG"
+                fi
                 LOC="${{ parameters.location }}"
                 SUBNET_NAME="snet-companion-private-endpoints"
 
@@ -72,7 +86,6 @@ stages:
                 STORAGE_NAME="${{ parameters.storageAccountName }}"
                 SEARCH_NAME="${{ parameters.aiSearchName }}"
                 ACR_NAME="${{ parameters.acrName }}"
-                DNS_RG="$RG"
 
                 # IDs complets pour les opérations cross-RG
                 SUBNET_ID="/subscriptions/$SUBSCRIPTION_ID/resourceGroups/$VNET_RG/providers/Microsoft.Network/virtualNetworks/$VNET_NAME/subnets/$SUBNET_NAME"
@@ -81,7 +94,8 @@ stages:
                 echo "============================================================"
                 echo "        DURCISSEMENT RÉSEAU"
                 echo "============================================================"
-                echo "Resource Group       : $RG"
+                echo "Resource Group (app) : $RG"
+                echo "Resource Group (PE)  : $NETWORK_RG"
                 echo "Subscription         : $SUBSCRIPTION_ID"
                 echo "VNet                 : $VNET_NAME (RG: $VNET_RG)"
                 echo "Subnet PE            : $SUBNET_NAME"
@@ -210,9 +224,10 @@ stages:
                     return 0
                   fi
 
-                  selected_rg=$(echo "$all_zone_rgs" | head -n 1)
-                  echo "⚠️  Plusieurs zones privées '$zone' détectées. Zone retenue: $selected_rg"
-                  echo "$selected_rg"
+                  echo "❌ Plusieurs zones privées '$zone' détectées sans zone dans le RG attendu '$DNS_RG'."
+                  echo "   Zones trouvées:"
+                  echo "$all_zone_rgs"
+                  return 1
                 }
 
                 # ----------------------------------------------------------------
@@ -262,13 +277,13 @@ stages:
                   local dns_zone_id="/subscriptions/$SUBSCRIPTION_ID/resourceGroups/$zone_rg/providers/Microsoft.Network/privateDnsZones/$zone_name"
 
                   if az network private-endpoint show \
-                    --resource-group "$RG" \
+                    --resource-group "$NETWORK_RG" \
                     --name "$pe_name" >/dev/null 2>&1; then
                     echo "⏭️  Private Endpoint déjà présent: $pe_name"
                   else
                     echo "Création Private Endpoint: $pe_name"
                     az network private-endpoint create \
-                      --resource-group "$RG" \
+                      --resource-group "$NETWORK_RG" \
                       --name "$pe_name" \
                       --location "$LOC" \
                       --subnet "$SUBNET_ID" \
@@ -279,14 +294,14 @@ stages:
                   fi
 
                   if az network private-endpoint dns-zone-group show \
-                    --resource-group "$RG" \
+                    --resource-group "$NETWORK_RG" \
                     --endpoint-name "$pe_name" \
                     --name "default" >/dev/null 2>&1; then
                     echo "⏭️  DNS zone group déjà présent pour: $pe_name"
                   else
                     echo "Association DNS privée pour: $pe_name"
                     az network private-endpoint dns-zone-group create \
-                      --resource-group "$RG" \
+                      --resource-group "$NETWORK_RG" \
                       --endpoint-name "$pe_name" \
                       --name "default" \
                       --private-dns-zone "$dns_zone_id" \
