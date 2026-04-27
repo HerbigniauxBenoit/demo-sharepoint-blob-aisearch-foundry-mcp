@@ -6,8 +6,6 @@ parameters:
     type: string
   - name: resourceGroupName
     type: string
-  - name: location
-    type: string
   - name: environment
     type: string
   - name: dependsOn

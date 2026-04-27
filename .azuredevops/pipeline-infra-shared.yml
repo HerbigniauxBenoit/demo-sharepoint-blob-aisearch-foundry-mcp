@@ -205,7 +205,6 @@ stages:
     parameters:
       azureSubscription: $(azureSubscription)
       resourceGroupName: $(resourceGroupName)
-      location: ${{ parameters.location }}
       environment: ${{ parameters.environment }}
       dependsOn:
         - CreateResourceGroup

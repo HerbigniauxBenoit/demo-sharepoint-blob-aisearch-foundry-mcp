@@ -27,7 +27,7 @@ parameters:
   - name: imageTag
     displayName: "Tag de l'image (laisser vide pour auto)"
     type: string
-    default: ' '   # vide => auto
+    default: ''   # vide => auto
 
 # ----------------------------------------------------
 # Variables
@@ -104,8 +104,8 @@ stages:
           echo "Login à l'ACR : ${REGISTRY_NAME}"
           az acr login --name ${REGISTRY_NAME} --only-show-errors
 
-          echo "docker push ${IMAGE_FULL_NAME}:${FINAL_TAG}"
-          docker push ${IMAGE_FULL_NAME}:${FINAL_TAG}
+          echo "docker push ${IMAGE_FULL_NAME}:${IMAGE_TAG}"
+          docker push ${IMAGE_FULL_NAME}:${IMAGE_TAG}
 
           echo "docker push ${IMAGE_FULL_NAME}:latest"
           docker push ${IMAGE_FULL_NAME}:latest

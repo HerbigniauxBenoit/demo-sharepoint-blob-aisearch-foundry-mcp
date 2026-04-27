@@ -34,8 +34,6 @@ parameters:
     type: string
   - name: deleteOrphanedBlobs
     type: string
-  - name: syncPermissions
-    type: string
 
 steps:
   - task: AzureCLI@2

@@ -38,7 +38,7 @@ stages:
                   az cognitiveservices account project update \
                     --name "${{ parameters.foundryName }}" \
                     --resource-group "${{ parameters.resourceGroupName }}" \
-                    --project-name "${{ parameters.projectName }}"
+                    --project-name "${{ parameters.projectName }}" \
                     --tags environment="${{ parameters.environment }}" \
                     --only-show-errors
 

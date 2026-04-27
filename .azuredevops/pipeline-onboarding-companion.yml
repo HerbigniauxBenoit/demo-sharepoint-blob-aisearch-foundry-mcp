@@ -103,7 +103,7 @@ variables:
   imageName: 'sharepoint-sync'
 
   # Service Connection
-  azureSubscription: 'SVC-GPTrusted_${{ upper(parameters.environment) }}'
+  azureSubscription: 'SVC_GPTrusted_${{ upper(parameters.environment) }}'
 
 # =============================================================================
 # STAGES
@@ -220,11 +220,30 @@ stages:
       sharepointFolderPath: ${{ parameters.sharepointFolderPath }}
       syncSchedule: ${{ parameters.syncSchedule }}
       deleteOrphanedBlobs: ${{ parameters.deleteOrphanedBlobs }}
-      syncPermissions: ${{ parameters.syncPermissions }}
       dependsOn:
         - Validation
         - AssignRBAC
         - ConfigureAISearch
+
+  - ${{ if eq(parameters.allowSecurity, true) }}:
+    - template: templates/stages/stage-apply-companion-security.yml
+      parameters:
+        azureSubscription: $(azureSubscription)
+        resourceGroupName: $(sharedResourceGroupName)
+        networkResourceGroupName: $(networkResourceGroupName)
+        environment: ${{ parameters.environment }}
+        companionName: ${{ parameters.companionName }}
+        storageAccountName: $(storageAccountName)
+        blobContainerName: $(blobContainerName)
+        aiSearchName: $(aiSearchName)
+        aiSearchIndexName: $(aiSearchIndexName)
+        aiSearchDataSourceName: $(aiSearchDataSourceName)
+        aiSearchIndexerName: $(aiSearchIndexerName)
+        containerAppName: $(containerAppName)
+        appInsightsName: $(appInsightsName)
+        managedIdentityName: $(managedIdentityName)
+        dependsOn:
+          - DeployContainerApp
 
   - template: templates/stages/stage-assign-rbac-ai-user.yml
     parameters:

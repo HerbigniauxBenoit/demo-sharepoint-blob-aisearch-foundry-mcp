@@ -277,7 +277,6 @@ steps:
               --resource-group "$NETWORK_RG" \
               --endpoint-name "$PE_NAME" \
               --name "default" \
-              --yes \
               --only-show-errors >/dev/null 2>&1 || true
 
             az network private-endpoint dns-zone-group create \

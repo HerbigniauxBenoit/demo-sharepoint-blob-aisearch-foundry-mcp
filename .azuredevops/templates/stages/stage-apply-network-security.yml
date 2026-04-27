@@ -309,19 +309,36 @@ stages:
                       echo "⏭️  DNS zone group et enregistrement A déjà présents pour: $pe_name"
                     else
                       echo "⚠️  DNS zone group présent mais enregistrement A manquant pour: $pe_name — recréation du zone group"
-                      az network private-endpoint dns-zone-group delete \
+                      if ! az network private-endpoint dns-zone-group delete \
                         --resource-group "$NETWORK_RG" \
                         --endpoint-name "$pe_name" \
                         --name "default" \
-                        --only-show-errors >/dev/null
-                      az network private-endpoint dns-zone-group create \
+                        --only-show-errors >/dev/null 2>&1; then
+                        echo "⚠️  Suppression du DNS zone group impossible (ou déjà supprimé), poursuite..."
+                      fi
+
+                      if ! az network private-endpoint dns-zone-group create \
                         --resource-group "$NETWORK_RG" \
                         --endpoint-name "$pe_name" \
                         --name "default" \
                         --private-dns-zone "$dns_zone_id" \
                         --zone-name "default" \
-                        --only-show-errors >/dev/null
-                      echo "✅ DNS zone group recréé pour: $pe_name"
+                        --only-show-errors >/dev/null 2>&1; then
+                        echo "❌ Impossible de recréer le DNS zone group pour: $pe_name"
+                        exit 1
+                      fi
+
+                      record_ip=$(az network private-dns record-set a show \
+                        --resource-group "$zone_rg" \
+                        --zone-name "$zone_name" \
+                        --name "$dns_record_name" \
+                        --query "aRecords[0].ipv4Address" -o tsv 2>/dev/null || true)
+
+                      if [ -n "$record_ip" ]; then
+                        echo "✅ DNS zone group recréé et enregistrement A détecté pour: $pe_name"
+                      else
+                        echo "⚠️  DNS zone group recréé mais enregistrement A encore absent pour: $pe_name"
+                      fi
                     fi
                   else
                     echo "Association DNS privée pour: $pe_name"

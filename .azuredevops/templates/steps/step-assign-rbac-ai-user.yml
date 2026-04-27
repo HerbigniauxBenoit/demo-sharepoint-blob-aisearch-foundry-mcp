@@ -26,7 +26,7 @@ steps:
           --resource-group "${{ parameters.resourceGroupName }}" \
           --query identity.principalId -o tsv)
         TARGET_SUBSCRIPTION=${{ parameters.targetSubscription }}
-        if [ -z $TARGET_SUBSCRIPTION ]; then
+        if [ -z "$TARGET_SUBSCRIPTION" ]; then
             TARGET_SUBSCRIPTION=$(az functionapp show \
               --name "${{ parameters.functionapp }}" \
               --resource-group "${{ parameters.resourceGroupName }}" \
@@ -34,7 +34,7 @@ steps:
         fi
         EXISTING_COUNT=$(az role assignment list \
           --assignee "$MSI_PRINCIPAL_ID" \
-          --scope "$TARGET_SUBSCRIPTION" \
+          --scope "/subscriptions/$TARGET_SUBSCRIPTION" \
           --query "[?roleDefinitionName=='Azure AI User'] | length(@)" \
           -o tsv)
 

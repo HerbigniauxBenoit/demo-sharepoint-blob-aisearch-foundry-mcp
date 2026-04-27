@@ -52,7 +52,7 @@ stages:
                     --location "${{ parameters.location }}" \
                     --kind AIServices \
                     --sku s0 \
-                    --allow-project-management
+                    --allow-project-management \
                     --tags \
                       environment="${{ parameters.environment }}"
 

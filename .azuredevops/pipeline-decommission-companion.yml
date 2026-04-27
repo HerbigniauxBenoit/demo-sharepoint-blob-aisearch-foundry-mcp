@@ -55,7 +55,6 @@ stages:
       aiSearchName: $(aiSearchName)
       containerAppsEnvName: $(containerAppsEnvName)
       appInsightsName: $(appInsightsName)
-      acrName: $(acrName)
       containerAppName: $(containerAppName)
       managedIdentityName: $(managedIdentityName)
       blobContainerName: $(blobContainerName)
