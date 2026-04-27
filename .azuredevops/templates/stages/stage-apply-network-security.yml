@@ -274,6 +274,7 @@ stages:
                   local group_id="$3"
                   local zone_name="$4"
                   local zone_rg="$5"
+                  local dns_record_name="$6"
                   local dns_zone_id="/subscriptions/$SUBSCRIPTION_ID/resourceGroups/$zone_rg/providers/Microsoft.Network/privateDnsZones/$zone_name"
 
                   if az network private-endpoint show \
@@ -293,11 +294,36 @@ stages:
                       --only-show-errors >/dev/null
                   fi
 
+                  local record_ip
+                  record_ip=$(az network private-dns record-set a show \
+                    --resource-group "$zone_rg" \
+                    --zone-name "$zone_name" \
+                    --name "$dns_record_name" \
+                    --query "aRecords[0].ipv4Address" -o tsv 2>/dev/null || true)
+
                   if az network private-endpoint dns-zone-group show \
                     --resource-group "$NETWORK_RG" \
                     --endpoint-name "$pe_name" \
                     --name "default" >/dev/null 2>&1; then
-                    echo "⏭️  DNS zone group déjà présent pour: $pe_name"
+                    if [ -n "$record_ip" ]; then
+                      echo "⏭️  DNS zone group et enregistrement A déjà présents pour: $pe_name"
+                    else
+                      echo "⚠️  DNS zone group présent mais enregistrement A manquant pour: $pe_name — recréation du zone group"
+                      az network private-endpoint dns-zone-group delete \
+                        --resource-group "$NETWORK_RG" \
+                        --endpoint-name "$pe_name" \
+                        --name "default" \
+                        --yes \
+                        --only-show-errors >/dev/null
+                      az network private-endpoint dns-zone-group create \
+                        --resource-group "$NETWORK_RG" \
+                        --endpoint-name "$pe_name" \
+                        --name "default" \
+                        --private-dns-zone "$dns_zone_id" \
+                        --zone-name "default" \
+                        --only-show-errors >/dev/null
+                      echo "✅ DNS zone group recréé pour: $pe_name"
+                    fi
                   else
                     echo "Association DNS privée pour: $pe_name"
                     az network private-endpoint dns-zone-group create \
@@ -326,7 +352,8 @@ stages:
                   "$STORAGE_ID" \
                   "blob" \
                   "privatelink.blob.core.windows.net" \
-                  "$BLOB_ZONE_RG"
+                  "$BLOB_ZONE_RG" \
+                  "$STORAGE_NAME"
 
                 # --- AI Search ---
                 SEARCH_ZONE_RG=$(ensure_private_dns_zone "privatelink.search.windows.net" | tail -n 1)
@@ -336,7 +363,8 @@ stages:
                   "$SEARCH_ID" \
                   "searchService" \
                   "privatelink.search.windows.net" \
-                  "$SEARCH_ZONE_RG"
+                  "$SEARCH_ZONE_RG" \
+                  "$SEARCH_NAME"
 
                 # --- ACR (Premium uniquement) ---
                 ACR_PRIVATE_READY="false"
@@ -348,7 +376,8 @@ stages:
                     "$ACR_ID" \
                     "registry" \
                     "privatelink.azurecr.io" \
-                    "$ACR_ZONE_RG"
+                    "$ACR_ZONE_RG" \
+                    "$ACR_NAME"
                   ACR_PRIVATE_READY="true"
                 else
                   echo "⚠️  ACR SKU=$ACR_SKU: Private Endpoint non supporté (Premium requis)."

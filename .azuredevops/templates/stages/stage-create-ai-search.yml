@@ -36,16 +36,19 @@ stages:
               scriptType: 'bash'
               scriptLocation: 'inlineScript'
               inlineScript: |
+                set -euo pipefail
+
                 if az search service show --name "${{ parameters.aiSearchName }}" --resource-group "${{ parameters.resourceGroupName }}" &>/dev/null; then
                   echo "ℹ️  Azure AI Search '${{ parameters.aiSearchName }}' existe déjà, mise à jour des tags"
 
                   az search service update \
                     --name "${{ parameters.aiSearchName }}" \
                     --resource-group "${{ parameters.resourceGroupName }}" \
+                    --identity-type SystemAssigned \
                     --tags environment="${{ parameters.environment }}" \
                     --only-show-errors
 
-                  echo "✅ Azure AI Search déjà existant (tags mis à jour)"
+                  echo "✅ Azure AI Search déjà existant (tags + identité managée)"
                 else
                   echo "Création d'Azure AI Search ${{ parameters.aiSearchName }}..."
 
@@ -54,6 +57,7 @@ stages:
                     --resource-group "${{ parameters.resourceGroupName }}" \
                     --location "${{ parameters.location }}" \
                     --sku "${{ parameters.aiSearchSku }}" \
+                    --identity-type SystemAssigned \
                     --partition-count 1 \
                     --replica-count 1 \
                     --tags \
@@ -61,5 +65,17 @@ stages:
 
                   echo "✅ Azure AI Search créé"
                 fi
+
+                SEARCH_MI_TYPE=$(az search service show \
+                  --name "${{ parameters.aiSearchName }}" \
+                  --resource-group "${{ parameters.resourceGroupName }}" \
+                  --query "identity.type" -o tsv 2>/dev/null || true)
+
+                if [ -z "$SEARCH_MI_TYPE" ] || [ "$SEARCH_MI_TYPE" = "None" ] || [ "$SEARCH_MI_TYPE" = "null" ]; then
+                  echo "❌ L'identité managée du service AI Search n'est pas active."
+                  exit 1
+                fi
+
+                echo "✅ Identité managée AI Search active: $SEARCH_MI_TYPE"
                 echo ""
                 echo "URL: https://${{ parameters.aiSearchName }}.search.windows.net"

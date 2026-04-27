@@ -115,6 +115,34 @@ steps:
 
         SEARCH_URL="https://${SEARCH_HOST}"
         echo "Endpoint AI Search utilisé: $SEARCH_URL"
+
+        SEARCH_MI_TYPE=$(az search service show \
+          --name "$SEARCH_NAME" \
+          --resource-group "$RG" \
+          --query "identity.type" -o tsv 2>/dev/null || true)
+
+        if [ -z "$SEARCH_MI_TYPE" ] || [ "$SEARCH_MI_TYPE" = "None" ] || [ "$SEARCH_MI_TYPE" = "null" ]; then
+          echo "⚠️  Identité managée absente sur AI Search. Activation en cours..."
+
+          az search service update \
+            --name "$SEARCH_NAME" \
+            --resource-group "$RG" \
+            --identity-type SystemAssigned \
+            --only-show-errors >/dev/null
+
+          SEARCH_MI_TYPE=$(az search service show \
+            --name "$SEARCH_NAME" \
+            --resource-group "$RG" \
+            --query "identity.type" -o tsv 2>/dev/null || true)
+        fi
+
+        if [ -z "$SEARCH_MI_TYPE" ] || [ "$SEARCH_MI_TYPE" = "None" ] || [ "$SEARCH_MI_TYPE" = "null" ]; then
+          echo "❌ Impossible d'activer l'identité managée AI Search."
+          echo "   Corrigez la ressource Search (identity.type=SystemAssigned), puis relancez le pipeline."
+          exit 1
+        fi
+
+        echo "✅ Identité managée AI Search active: $SEARCH_MI_TYPE"
         
         echo "Création de l'indexer '${{ parameters.indexerName }}'..."
 
