@@ -143,8 +143,9 @@ stages:
                   --name "$STORAGE_NAME" \
                   --resource-group "$RG" \
                   --query publicNetworkAccess -o tsv 2>/dev/null || echo "unknown")
+                STORAGE_PNA_LC=$(echo "$STORAGE_PNA" | tr '[:upper:]' '[:lower:]')
 
-                if [ "$STORAGE_PNA" = "Disabled" ]; then
+                if [ "$STORAGE_PNA_LC" = "disabled" ]; then
                   echo "✅ Storage accès public fermé"
                 else
                   echo "❌ Storage publicNetworkAccess: $STORAGE_PNA (attendu: Disabled)"
@@ -156,8 +157,9 @@ stages:
                   --name "$SEARCH_NAME" \
                   --resource-group "$RG" \
                   --query publicNetworkAccess -o tsv 2>/dev/null || echo "unknown")
+                SEARCH_PNA_LC=$(echo "$SEARCH_PNA" | tr '[:upper:]' '[:lower:]')
 
-                if [ "$SEARCH_PNA" = "disabled" ]; then
+                if [ "$SEARCH_PNA_LC" = "disabled" ]; then
                   echo "✅ AI Search accès public fermé"
                 else
                   echo "❌ AI Search publicNetworkAccess: $SEARCH_PNA (attendu: disabled)"
@@ -169,8 +171,9 @@ stages:
                   --name "$ACR_NAME" \
                   --resource-group "$RG" \
                   --query publicNetworkAccess -o tsv 2>/dev/null || echo "unknown")
+                ACR_PUBLIC_LC=$(echo "$ACR_PUBLIC" | tr '[:upper:]' '[:lower:]')
 
-                if [ "$ACR_SKU" = "Premium" ] && [ "$ACR_PUBLIC" = "disabled" ]; then
+                if [ "$ACR_SKU" = "Premium" ] && [ "$ACR_PUBLIC_LC" = "disabled" ]; then
                   echo "✅ ACR accès public fermé (Premium)"
                 elif [ "$ACR_SKU" = "Premium" ]; then
                   echo "❌ ACR publicNetworkAccess: $ACR_PUBLIC (attendu: disabled pour Premium)"
