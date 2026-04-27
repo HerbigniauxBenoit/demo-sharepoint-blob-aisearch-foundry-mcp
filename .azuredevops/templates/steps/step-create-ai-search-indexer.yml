@@ -10,6 +10,8 @@ parameters:
     type: string
   - name: aiSearchName
     type: string
+  - name: storageAccountName
+    type: string
   - name: indexerName
     type: string
   - name: dataSourceName
@@ -38,6 +40,7 @@ steps:
           NETWORK_RG="$RG"
         fi
         SEARCH_NAME="${{ parameters.aiSearchName }}"
+        STORAGE_NAME="${{ parameters.storageAccountName }}"
         
         SEARCH_KEY=$(az search admin-key show \
           --service-name "${{ parameters.aiSearchName }}" \
@@ -143,6 +146,53 @@ steps:
         fi
 
         echo "✅ Identité managée AI Search active: $SEARCH_MI_TYPE"
+
+        # ================================================================
+        # Vérification et assignation RBAC: Storage Blob Data Reader
+        # ================================================================
+        echo ""
+        echo "Vérification permissions RBAC (Storage Blob Data Reader)..."
+
+        SEARCH_PRINCIPAL_ID=$(az search service show \
+          --name "$SEARCH_NAME" \
+          --resource-group "$RG" \
+          --query "identity.principalId" -o tsv 2>/dev/null || true)
+
+        if [ -z "$SEARCH_PRINCIPAL_ID" ]; then
+          echo "❌ Impossible de récupérer le principalId de l'identité AI Search."
+          exit 1
+        fi
+
+        STORAGE_ID=$(az storage account show \
+          --name "${STORAGE_NAME}" \
+          --resource-group "$RG" \
+          --query id -o tsv 2>/dev/null || true)
+
+        if [ -z "$STORAGE_ID" ]; then
+          echo "❌ Impossible de récupérer l'ID du compte Storage."
+          exit 1
+        fi
+
+        ROLE_ID="2a2b9908-6ea1-4ae2-8e65-a410df84e7d1"  # Storage Blob Data Reader
+
+        EXISTING_ASSIGNMENT=$(az role assignment list \
+          --assignee "$SEARCH_PRINCIPAL_ID" \
+          --scope "$STORAGE_ID" \
+          --query "length(@)" -o tsv 2>/dev/null || echo "0")
+
+        if [ "$EXISTING_ASSIGNMENT" -gt 0 ]; then
+          echo "✅ Rôle Storage Blob Data Reader déjà assigné à l'identité AI Search"
+        else
+          echo "⚠️  Assignation du rôle Storage Blob Data Reader en cours..."
+
+          az role assignment create \
+            --role "$ROLE_ID" \
+            --assignee-object-id "$SEARCH_PRINCIPAL_ID" \
+            --scope "$STORAGE_ID" \
+            --only-show-errors >/dev/null
+
+          echo "✅ Rôle Storage Blob Data Reader assigné"
+        fi
         
         echo "Création de l'indexer '${{ parameters.indexerName }}'..."
 

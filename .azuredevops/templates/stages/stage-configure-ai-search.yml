@@ -86,6 +86,7 @@ stages:
               resourceGroupName: ${{ parameters.resourceGroupName }}
               networkResourceGroupName: ${{ parameters.networkResourceGroupName }}
               aiSearchName: ${{ parameters.aiSearchName }}
+              storageAccountName: ${{ parameters.storageAccountName }}
               indexerName: ${{ parameters.indexerName }}
               dataSourceName: ${{ parameters.dataSourceName }}
               indexName: ${{ parameters.indexName }}
