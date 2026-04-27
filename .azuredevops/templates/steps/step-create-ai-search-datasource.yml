@@ -167,11 +167,7 @@ steps:
           "container": {
             "name": "$CONTAINER_NAME"
           },
-          "description": "Data source for companion $COMPANION_NAME",
-          "identity": {
-            "@odata.type": "#Microsoft.Azure.Search.DataUserAssignedIdentity",
-            "userAssignedIdentity": null
-          }
+          "description": "Data source for companion $COMPANION_NAME"
         }
         EOF
         )
