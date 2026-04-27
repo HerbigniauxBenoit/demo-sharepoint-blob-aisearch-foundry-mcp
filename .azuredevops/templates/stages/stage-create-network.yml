@@ -35,7 +35,7 @@ stages:
 
                 RG="${{ parameters.resourceGroupName }}"
                 SUBNET_NAME="snet-companion-private-endpoints"
-                SUBNET_CIDR="140.26.140.64/26"
+                SUBNET_CIDR="10.26.140.64/26"
 
                 case "${{ parameters.environment }}" in
                   dev)  VNET_NAME="vnet-gptrusted-dev"  ;;

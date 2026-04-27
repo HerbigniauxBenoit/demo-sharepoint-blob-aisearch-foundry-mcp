@@ -34,6 +34,8 @@ parameters:
     type: string
   - name: deleteOrphanedBlobs
     type: string
+  - name: syncPermissions
+    type: string
   - name: dependsOn
     type: object
     default: []
@@ -66,3 +68,4 @@ stages:
               sharepointFolderPath: ${{ parameters.sharepointFolderPath }}
               syncSchedule: ${{ parameters.syncSchedule }}
               deleteOrphanedBlobs: ${{ parameters.deleteOrphanedBlobs }}
+              syncPermissions: ${{ parameters.syncPermissions }}

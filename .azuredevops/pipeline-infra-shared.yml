@@ -80,7 +80,7 @@ variables:
   logAnalyticsName: 'log-companion-shared-${{ parameters.environment }}'
   appInsightsName: 'appi-companion-shared-${{ parameters.environment }}'
   acrName: 'acrcompanion${{ parameters.environment }}'
-  
+
   # Service Connection
   azureSubscription: 'SVC_GPTrusted_${{ upper(parameters.environment) }}'
 

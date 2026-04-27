@@ -1,0 +1,33 @@
+# =============================================================================
+# Stage Template : Assigner les rôles RBAC Azure AI User
+# =============================================================================
+parameters:
+  - name: azureSubscription
+    type: string
+  - name: functionAppName
+    type: string
+  - name: resourceGroupName
+    type: string
+  - name: targetSubscription
+    type: string
+    default: ""
+  - name: dependsOn
+    type: object
+    default: []
+
+stages:
+  - stage: AssignRBACAIUser
+    displayName: '🔑 X. Assigner RBAC AI User'
+    dependsOn: ${{ parameters.dependsOn }}
+    jobs:
+      - job: AssignStorageRoles
+        displayName: 'Assigner le role Azure AI User'
+        pool:
+          vmImage: 'ubuntu-latest'
+        steps:
+          - template: ../steps/step-assign-rbac-ai-user.yml
+            parameters:
+              azureSubscription: ${{ parameters.azureSubscription }}
+              functionapp: ${{ parameters.functionAppName }}
+              resourceGroupName: ${{ parameters.resourceGroupName }}
+              targetSubscription: ${{ parameters.targetSubscription }}

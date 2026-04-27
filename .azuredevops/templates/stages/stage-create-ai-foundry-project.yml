@@ -1,0 +1,64 @@
+parameters:
+  - name: azureSubscription
+    type: string
+  - name: resourceGroupName
+    type: string
+  - name: location
+    type: string
+  - name: foundryName
+    type: string
+  - name: projectName
+    type: string
+  - name: environment
+    type: string
+  - name: dependsOn
+    type: object
+    default: []
+
+stages:
+  - stage: CreateFoundryProject
+    displayName: '🗂️ Créer Azure AI Foundry Project'
+    dependsOn: ${{ parameters.dependsOn }}
+    jobs:
+      - job: CreateFoundryProject
+        displayName: 'Créer le service AI Foundry Project'
+        pool:
+          vmImage: 'ubuntu-latest'
+        steps:
+          - task: AzureCLI@2
+            displayName: '🗂️ az cognitiveservices account project create'
+            inputs:
+              azureSubscription: ${{ parameters.azureSubscription }}
+              scriptType: 'bash'
+              scriptLocation: 'inlineScript'
+              inlineScript: |
+                if az cognitiveservices account project show --name "${{ parameters.foundryName }}" --project-name "${{ parameters.projectName }}" --resource-group "${{ parameters.resourceGroupName }}" &>/dev/null; then
+                  echo "ℹ️ Azure AI Foundry Project '${{ parameters.projectName }}' existe déjà, mise à jour des tags"
+
+                  az cognitiveservices account project update \
+                    --name "${{ parameters.foundryName }}" \
+                    --resource-group "${{ parameters.resourceGroupName }}" \
+                    --project-name "${{ parameters.projectName }}"
+                    --tags environment="${{ parameters.environment }}" \
+                    --only-show-errors
+
+                  echo "✅ Azure AI Foundry project déjà existant (tags mis à jour)"
+                else
+                  echo "🗂️ Création d'Azure AI Foundry Project ${{ parameters.projectName }}..."
+                  echo "account name: ${{ parameters.foundryName }}"
+                  echo "project name: ${{ parameters.projectName }}"
+                  echo "location: ${{ parameters.location }}"
+                  echo "resource group name: ${{ parameters.resourceGroupName }}"
+                  echo 'az cognitiveservices account project create --name "${{ parameters.foundryName }}" --project-name "${{ parameters.projectName }}" --resource-group "${{ parameters.resourceGroupName }}" --location "${{ parameters.location }}" --tags environment="${{ parameters.environment }}"'
+                  echo ""
+                  az cognitiveservices account project create --name "${{ parameters.foundryName }}" --project-name "${{ parameters.projectName }}" --resource-group "${{ parameters.resourceGroupName }}" --location "${{ parameters.location }}"
+                  # az cognitiveservices account project create \
+                  #  --name "${{ parameters.foundryName }}"
+                  #  --project-name "${{ parameters.projectName }}" \
+                  #  --resource-group "${{ parameters.resourceGroupName }}" \
+                  #  --location "${{ parameters.location }}"
+
+                  echo "✅ Azure AI Foundry Project created"
+                fi
+                echo ""
+                echo "URL: https://${{ parameters.foundryName }}.services.ai.azure.com/api/projects/${{ parameters.projectName }}"

@@ -1,0 +1,68 @@
+parameters:
+  - name: azureSubscription
+    type: string
+  - name: resourceGroupName
+    type: string
+  - name: location
+    type: string
+  - name: foundryName
+    type: string
+  - name: environment
+    type: string
+  - name: dependsOn
+    type: object
+    default: []
+
+stages:
+  - stage: CreateFoundry
+    displayName: '📚 Créer Azure AI Foundry'
+    dependsOn: ${{ parameters.dependsOn }}
+    jobs:
+      - job: CreateFoundry
+        displayName: 'Créer le service AI Foundry'
+        pool: gptrusted-${{ parameters.environment }}
+        steps:
+          - task: AzureCLI@2
+            displayName: '📚 az cognitiveservices account create'
+            inputs:
+              azureSubscription: ${{ parameters.azureSubscription }}
+              scriptType: 'bash'
+              scriptLocation: 'inlineScript'
+              inlineScript: |
+                if az cognitiveservices account show --name "${{ parameters.foundryName }}" --resource-group "${{ parameters.resourceGroupName }}" &>/dev/null; then
+                  echo "ℹ️ Azure AI Foundry '${{ parameters.foundryName }}' existe déjà, mise à jour des tags"
+
+                  az cognitiveservices account update \
+                    --name "${{ parameters.foundryName }}" \
+                    --resource-group "${{ parameters.resourceGroupName }}" \
+                    --kind AIServices \
+                    --sku s0 \
+                    --allow-project-management \
+                    --custom-domain "${{ parameters.foundryName }}" \
+                    --tags environment="${{ parameters.environment }}" \
+                    --only-show-errors
+
+                  echo "✅ Azure AI Foundry déjà existant (tags mis à jour)"
+                else
+                  echo "📚 Création d'Azure AI Foundry ${{ parameters.foundryName }}..."
+
+                  az cognitiveservices account create \
+                    --name "${{ parameters.foundryName }}" \
+                    --resource-group "${{ parameters.resourceGroupName }}" \
+                    --location "${{ parameters.location }}" \
+                    --kind AIServices \
+                    --sku s0 \
+                    --allow-project-management
+                    --tags \
+                      environment="${{ parameters.environment }}"
+
+
+                  az cognitiveservices account update \
+                    --name "${{ parameters.foundryName }}" \
+                    --resource-group "${{ parameters.resourceGroupName }}" \
+                    --custom-domain "${{ parameters.foundryName }}"
+
+                  echo "✅ Azure AI Foundry created"
+                fi
+                echo ""
+                echo "URL: https://${{ parameters.foundryName }}.services.ai.azure.com/"

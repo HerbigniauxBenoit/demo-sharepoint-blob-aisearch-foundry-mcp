@@ -1,0 +1,78 @@
+# This should be use maybe when the agent module from az cognitives services will be out from Preview
+# Parameters names may varies.
+parameters:
+  - name: azureSubscription
+    type: string
+  - name: resourceGroupName
+    type: string
+  - name: location
+    type: string
+  - name: foundryName
+    type: string
+  - name: projectName
+    type: string
+  - name: agentName
+    type: string
+  - name: agentModel
+    type: string
+  - name: agentDescription
+    type: string
+  - name: agentInstructions
+    type: string
+  - name: environment
+    type: string
+  - name: dependsOn
+    type: object
+    default: []
+
+stages:
+  - stage: CreateFoundryAgent
+    displayName: '👮‍♂️ Créer Azure AI Foundry Agent'
+    dependsOn: ${{ parameters.dependsOn }}
+    jobs:
+      - job: CreateFoundryAgent
+        displayName: 'Créer le service AI Foundry Agent'
+        pool:
+          vmImage: 'ubuntu-latest'
+        steps:
+          - task: AzureCLI@2
+            displayName: '👮‍♂️ az cognitiveservices agent create'
+            inputs:
+              azureSubscription: ${{ parameters.azureSubscription }}
+              scriptType: 'bash'
+              scriptLocation: 'inlineScript'
+              inlineScript: |
+                if az cognitiveservices agent show --name "${{ parameters.agentName }}" --project-name "${{ parameters.projectName }}" --account-name "${{ parameters.foundryName }}" --resource-group "${{ parameters.resourceGroupName }}" &>/dev/null; then
+                  echo "ℹ️ Azure AI Foundry Agent '${{ parameters.agentName }}' existe déjà, mise à jour des tags"
+
+                  az cognitiveservices agent update \
+                    --name "${{ parameters.agentName }}" \
+                    --resource-group "${{ parameters.resourceGroupName }}" \
+                    --project-name "${{ parameters.projectName }}" \
+                    --account-name "${{ parameters.foundryName }}" \
+                    --model "${{ parameters.model }}" \
+                    --description "${{ parameters.agentDescription }}" \
+                    --instructions "${{ parameters.agentInstructions }}" \
+                    --tags environment="${{ parameters.environment }}" \
+                    --only-show-errors
+
+                  echo "✅ Azure AI Foundry Agent déjà existant (tags mis à jour)"
+                else
+                  echo "👮‍♂️ Création d'Azure AI Foundry Agent ${{ parameters.agentName }}..."
+
+                  az cognitiveservices agent create \
+                    --name "${{ parameters.agentName }}" \
+                    --resource-group "${{ parameters.resourceGroupName }}" \
+                    --project-name "${{ parameters.projectName }}" \
+                    --account-name "${{ parameters.foundryName }}" \
+                    --model "${{ parameters.model }}" \
+                    --description "${{ parameters.agentDescription }}" \
+                    --instructions "${{ parameters.agentInstructions }}" \
+                    --location "${{ parameters.location }}" \
+                    --tags \
+                      environment="${{ parameters.environment }}"
+
+                  echo "✅ Azure AI Foundry Agent created"
+                fi
+                echo ""
+                echo "Agent Identifier for ${{ parameters.agentName }} is :"

@@ -113,7 +113,7 @@ steps:
         echo "Création de l'index '${{ parameters.indexName }}'..."
         
         CURL_EXIT=0
-        HTTP_RESPONSE=$(curl -s -w "\n%{http_code}" \
+        HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
           "${CURL_SEARCH_EXTRA_ARGS[@]}" \
           -X PUT "$SEARCH_URL/indexes/${{ parameters.indexName }}?api-version=2024-07-01" \
           -H "Content-Type: application/json" \
@@ -137,14 +137,10 @@ steps:
           print_search_network_diagnostics "$SEARCH_HOST"
           exit "$CURL_EXIT"
         fi
-
-        HTTP_BODY=$(echo "$HTTP_RESPONSE" | head -n -1)
-        HTTP_STATUS=$(echo "$HTTP_RESPONSE" | tail -n 1)
         
         if [ "$HTTP_STATUS" == "201" ] || [ "$HTTP_STATUS" == "204" ]; then
           echo "✅ Index créé/mis à jour"
         else
           echo "❌ Erreur lors de la création de l'index (HTTP $HTTP_STATUS)"
-          echo "   Détail: $HTTP_BODY"
           exit 1
         fi

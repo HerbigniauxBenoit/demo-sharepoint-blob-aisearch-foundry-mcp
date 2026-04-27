@@ -1,0 +1,52 @@
+# =============================================================================
+# Step Template : Assigner les rôles RBAC Azure AI User
+# =============================================================================
+parameters:
+  - name: azureSubscription
+    type: string
+  - name: functionapp
+    type: string
+  - name: resourceGroupName
+    type: string
+  - name: targetSubscription
+    type: string
+    default: ""
+steps:
+  - task: AzureCLI@2
+    displayName: '🔑 Assigner rôle Azure AI User'
+    inputs:
+      azureSubscription: ${{ parameters.azureSubscription }}
+      scriptType: 'bash'
+      scriptLocation: 'inlineScript'
+      inlineScript: |
+        echo "Assignation du rôle Azure AI User..."
+
+        MSI_PRINCIPAL_ID=$(az functionapp show \
+          --name "${{ parameters.functionapp }}" \
+          --resource-group "${{ parameters.resourceGroupName }}" \
+          --query identity.principalId -o tsv)
+        TARGET_SUBSCRIPTION=${{ parameters.targetSubscription }}
+        if [ -z $TARGET_SUBSCRIPTION ]; then
+            TARGET_SUBSCRIPTION=$(az functionapp show \
+              --name "${{ parameters.functionapp }}" \
+              --resource-group "${{ parameters.resourceGroupName }}" \
+              --query subscriptionId -o tsv)
+        fi
+        EXISTING_COUNT=$(az role assignment list \
+          --assignee "$MSI_PRINCIPAL_ID" \
+          --scope "$TARGET_SUBSCRIPTION" \
+          --query "[?roleDefinitionName=='Azure AI User'] | length(@)" \
+          -o tsv)
+
+        if [ "$EXISTING_COUNT" != "0" ]; then
+          echo "ℹ️  Rôle Azure AI User déjà assigné"
+        else
+          az role assignment create \
+            --assignee "$MSI_PRINCIPAL_ID" \
+            --role "Azure AI User" \
+            --scope "/subscriptions/$TARGET_SUBSCRIPTION" \
+            --only-show-errors
+
+          echo "✅ Azure AI User assigné"
+        fi
+

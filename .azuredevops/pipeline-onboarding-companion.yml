@@ -21,6 +21,17 @@ parameters:
       - nprd
       - prod
 
+  - name: location
+    displayName: '📍 Région Azure du RG compagnon'
+    type: string
+    default: 'francecentral'
+    values:
+      - francecentral
+      - westeurope
+      - northeurope
+      - eastus
+      - westus2
+
   - name: companionName
     displayName: '🤖 Nom du compagnon (ex: hr-assistant)'
     type: string
@@ -63,6 +74,8 @@ parameters:
 # Variables
 # -----------------------------------------------------------------------------
 variables:
+  functionAppName: 'func-gptrusted-${{ parameters.environment }}'
+
   # Ressources partagées
   sharedResourceGroupName: 'rg-companion-${{ parameters.environment }}'
   networkResourceGroupName: 'rg-gptrusted-${{ parameters.environment }}'
@@ -72,7 +85,7 @@ variables:
   containerAppsEnvName: 'cae-companion-shared-${{ parameters.environment }}'
   appInsightsName: 'appi-companion-shared-${{ parameters.environment }}'
 
-  # Ressources du compagnon
+  # Ressources du compagnon (dans le même RG partagé)
   managedIdentityName: 'id-${{ parameters.companionName }}-${{ parameters.environment }}'
   containerAppName: 'ca-${{ parameters.companionName }}-sync-${{ parameters.environment }}'
   blobContainerName: '${{ parameters.companionName }}'
@@ -80,12 +93,17 @@ variables:
   aiSearchDataSourceName: 'ds-${{ parameters.companionName }}'
   aiSearchIndexerName: 'idxr-${{ parameters.companionName }}'
 
+  # Foundry
+  foundryName: 'aif-companion-${{ parameters.environment }}'
+  projectName: 'proj-${{ parameters.companionName }}'
+  companionName: '${{ parameters.companionName }}'
+
   # ACR
   acrName: 'acrcompanion${{ parameters.environment }}'
   imageName: 'sharepoint-sync'
 
   # Service Connection
-  azureSubscription: 'SVC_GPTrusted_${{ upper(parameters.environment) }}'
+  azureSubscription: 'SVC-GPTrusted_${{ upper(parameters.environment) }}'
 
 # =============================================================================
 # STAGES
@@ -202,35 +220,77 @@ stages:
       sharepointFolderPath: ${{ parameters.sharepointFolderPath }}
       syncSchedule: ${{ parameters.syncSchedule }}
       deleteOrphanedBlobs: ${{ parameters.deleteOrphanedBlobs }}
+      syncPermissions: ${{ parameters.syncPermissions }}
       dependsOn:
         - Validation
         - AssignRBAC
         - ConfigureAISearch
-        - ${{ if eq(parameters.allowSecurity, true) }}:
-          - VerifyNetworkSecurity
 
-  # Stage 8 : Sécurité du compagnon (optionnel)
-  - ${{ if eq(parameters.allowSecurity, true) }}:
-    - template: templates/stages/stage-apply-companion-security.yml
-      parameters:
-        azureSubscription: $(azureSubscription)
-        resourceGroupName: $(sharedResourceGroupName)
-        networkResourceGroupName: $(networkResourceGroupName)
-        environment: ${{ parameters.environment }}
-        companionName: ${{ parameters.companionName }}
-        storageAccountName: $(storageAccountName)
-        blobContainerName: $(blobContainerName)
-        aiSearchName: $(aiSearchName)
-        aiSearchIndexName: $(aiSearchIndexName)
-        aiSearchDataSourceName: $(aiSearchDataSourceName)
-        aiSearchIndexerName: $(aiSearchIndexerName)
-        containerAppName: $(containerAppName)
-        appInsightsName: $(appInsightsName)
-        managedIdentityName: $(managedIdentityName)
-        dependsOn:
-          - DeployContainerApp
+  - template: templates/stages/stage-assign-rbac-ai-user.yml
+    parameters:
+      azureSubscription: $(azureSubscription)
+      resourceGroupName: $(sharedResourceGroupName)
+      functionAppName: '$(functionAppName)'
+      targetSubscription: ''
+      dependsOn:
+        - Validation
 
-  # Stage 9 : Résumé
+  - template: templates/stages/stage-create-ai-foundry.yml
+    parameters:
+      azureSubscription: $(azureSubscription)
+      resourceGroupName: $(sharedResourceGroupName)
+      location: ${{ parameters.location }}
+      foundryName: $(foundryName)
+      environment: ${{ parameters.environment }}
+      dependsOn:
+        - Validation
+
+  - template: templates/stages/stage-create-ai-foundry-project.yml
+    parameters:
+      azureSubscription: $(azureSubscription)
+      resourceGroupName: $(sharedResourceGroupName)
+      location: ${{ parameters.location }}
+      foundryName: $(foundryName)
+      projectName: $(projectName)
+      environment: ${{ parameters.environment }}
+      dependsOn:
+        - Validation
+        - CreateFoundry
+
+  # Companions are created through an azure function since the feature is not available through az cognitiveservices account agent create for now.
+  - stage: CallAzureFunction
+    displayName: 'Call Azure Function'
+    dependsOn:
+      - Validation
+      - CreateFoundry
+      - CreateFoundryProject
+    jobs:
+      - job: CreateCompanion
+        displayName: 'Valider les paramètres'
+        steps:
+          - powershell: |
+              Write-Host "Running Powershell script"
+              $url = "https://$(functionAppName).azurewebsites.net/createcompanion"
+              $body = @{
+                Id = "$(companionName)".ToLower().Replace(' ', '-')
+                Name = "$(companionName)".ToLower().Replace(' ', '-')
+                FoundryName = "$(foundryName)".ToLower().Replace(' ', '-')
+                ProjectName = "$(projectName)".ToLower().Replace(' ', '-')
+                Description = "Here is the description of my agent, created from Azure Function"
+              } | ConvertTo-Json
+              $headers = @{
+                "Content-Type" = "application/json"
+              }
+              Write-Host "Creating companion $(companionName)"
+              # Write-Host "URL: $url"
+              Write-Host "Body: $body"
+              Write-Host "Go to the Creation Page on the application. And fill out the form."
+              # Write-Host "Running command: Invoke-RestMethod -Uri "$url" -Method POST -Body "$body" -Headers $headers -Verbose -Debug"
+              # $response = Invoke-RestMethod -Uri $url -Method POST -Body $body -Headers $headers -Verbose -Debug
+              # Write-Host "Companion has been created."
+            displayName: 'Run Invoke-WebRequest'
+
+  # Stage 7 : Résumé
   - template: templates/stages/stage-onboarding-summary.yml
     parameters:
       azureSubscription: $(azureSubscription)
