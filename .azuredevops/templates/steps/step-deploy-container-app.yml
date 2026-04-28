@@ -118,16 +118,19 @@ steps:
           --query loginServer -o tsv \
           --only-show-errors)
 
-        # Récupérer le client ID de la MSI user-assigned (requis pour registry set)
-        MSI_ID=$(az identity show \
+        # La MSI expose deux identifiants utiles ici :
+        # - id       : resource ID Azure pour lier le registry ACR
+        # - clientId : identifiant Entra pour le host Functions et DefaultAzureCredential
+        read -r MSI_ID MSI_CLIENT_ID <<< "$(az identity show \
           --name "${{ parameters.managedIdentityName }}" \
           --resource-group "${{ parameters.sharedResourceGroupName }}" \
-          --query id -o tsv \
-          --only-show-errors)
+          --query "[id,clientId]" -o tsv \
+          --only-show-errors)"
 
         IMAGE_NAME="$ACR_LOGIN_SERVER/${{ parameters.imageName }}:${{ parameters.imageTag }}"
 
-        echo "MSI Client ID  : $MSI_ID"
+        echo "MSI Resource ID: $MSI_ID"
+        echo "MSI Client ID  : $MSI_CLIENT_ID"
         echo "Image          : $IMAGE_NAME"
 
         echo "Configuration du registry ACR avec la MSI user-assigned..."
@@ -159,6 +162,8 @@ steps:
             "WEBSITES_INCLUDE_CLOUD_CERTS=true" \
             "AzureWebJobsStorage__accountName=${{ parameters.storageAccountName }}" \
             "AzureWebJobsStorage__credential=managedidentity" \
+            "AzureWebJobsStorage__clientId=$MSI_CLIENT_ID" \
+            "AZURE_CLIENT_ID=$MSI_CLIENT_ID" \
           --only-show-errors
 
         az containerapp show \
