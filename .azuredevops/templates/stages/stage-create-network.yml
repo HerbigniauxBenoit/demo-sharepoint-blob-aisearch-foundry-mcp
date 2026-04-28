@@ -32,8 +32,10 @@ stages:
                 set -euo pipefail
 
                 RG="${{ parameters.resourceGroupName }}"
-                SUBNET_NAME="snet-companion-private-endpoints"
-                SUBNET_CIDR="10.26.140.64/26"
+                PE_SUBNET_NAME="snet-companion-private-endpoints"
+                PE_SUBNET_CIDR="10.26.140.64/26"
+                CAE_SUBNET_NAME="snet-companion-cae-infra"
+                CAE_SUBNET_CIDR="10.26.140.0/27"
 
                 case "${{ parameters.environment }}" in
                   dev)  VNET_NAME="vnet-gptrusted-dev"  ;;
@@ -61,38 +63,40 @@ stages:
 
                 echo "✅ VNet existant trouvé: $VNET_NAME (RG: $VNET_RG)"
 
+                echo "=== Subnet Private Endpoints ==="
+
                 if az network vnet subnet show \
                   --resource-group "$VNET_RG" \
                   --vnet-name "$VNET_NAME" \
-                  --name "$SUBNET_NAME" >/dev/null 2>&1; then
-                  echo "ℹ️  Subnet '$SUBNET_NAME' déjà présent"
+                  --name "$PE_SUBNET_NAME" >/dev/null 2>&1; then
+                  echo "ℹ️  Subnet '$PE_SUBNET_NAME' déjà présent"
 
                   CURRENT_SUBNET_CIDR=$(az network vnet subnet show \
                     --resource-group "$VNET_RG" \
                     --vnet-name "$VNET_NAME" \
-                    --name "$SUBNET_NAME" \
+                    --name "$PE_SUBNET_NAME" \
                     --query "addressPrefix" -o tsv)
 
                   if [ -z "$CURRENT_SUBNET_CIDR" ] || [ "$CURRENT_SUBNET_CIDR" = "null" ]; then
                     CURRENT_SUBNET_CIDR=$(az network vnet subnet show \
                       --resource-group "$VNET_RG" \
                       --vnet-name "$VNET_NAME" \
-                      --name "$SUBNET_NAME" \
+                      --name "$PE_SUBNET_NAME" \
                       --query "addressPrefixes[0]" -o tsv)
                   fi
 
-                  if [ "$CURRENT_SUBNET_CIDR" != "$SUBNET_CIDR" ]; then
-                    echo "❌ Le subnet '$SUBNET_NAME' existe avec la plage '$CURRENT_SUBNET_CIDR' (attendu: '$SUBNET_CIDR')."
+                  if [ "$CURRENT_SUBNET_CIDR" != "$PE_SUBNET_CIDR" ]; then
+                    echo "❌ Le subnet '$PE_SUBNET_NAME' existe avec la plage '$CURRENT_SUBNET_CIDR' (attendu: '$PE_SUBNET_CIDR')."
                     exit 1
                   fi
                 else
-                  echo "Création du subnet '$SUBNET_NAME' ($SUBNET_CIDR)"
+                  echo "Création du subnet '$PE_SUBNET_NAME' ($PE_SUBNET_CIDR)"
 
                   az network vnet subnet create \
                     --resource-group "$VNET_RG" \
                     --vnet-name "$VNET_NAME" \
-                    --name "$SUBNET_NAME" \
-                    --address-prefixes "$SUBNET_CIDR" \
+                    --name "$PE_SUBNET_NAME" \
+                    --address-prefixes "$PE_SUBNET_CIDR" \
                     --disable-private-endpoint-network-policies true \
                     --only-show-errors >/dev/null
                 fi
@@ -100,8 +104,54 @@ stages:
                 az network vnet subnet update \
                   --resource-group "$VNET_RG" \
                   --vnet-name "$VNET_NAME" \
-                  --name "$SUBNET_NAME" \
+                  --name "$PE_SUBNET_NAME" \
                   --disable-private-endpoint-network-policies true \
                   --only-show-errors >/dev/null
 
-                echo "✅ Réseau prêt: VNet existant '$VNET_NAME' / Subnet '$SUBNET_NAME' ($SUBNET_CIDR)"
+                echo "=== Subnet CAE Infrastructure ==="
+
+                if az network vnet subnet show \
+                  --resource-group "$VNET_RG" \
+                  --vnet-name "$VNET_NAME" \
+                  --name "$CAE_SUBNET_NAME" >/dev/null 2>&1; then
+                  echo "ℹ️  Subnet '$CAE_SUBNET_NAME' déjà présent"
+
+                  CURRENT_SUBNET_CIDR=$(az network vnet subnet show \
+                    --resource-group "$VNET_RG" \
+                    --vnet-name "$VNET_NAME" \
+                    --name "$CAE_SUBNET_NAME" \
+                    --query "addressPrefix" -o tsv)
+
+                  if [ -z "$CURRENT_SUBNET_CIDR" ] || [ "$CURRENT_SUBNET_CIDR" = "null" ]; then
+                    CURRENT_SUBNET_CIDR=$(az network vnet subnet show \
+                      --resource-group "$VNET_RG" \
+                      --vnet-name "$VNET_NAME" \
+                      --name "$CAE_SUBNET_NAME" \
+                      --query "addressPrefixes[0]" -o tsv)
+                  fi
+
+                  if [ "$CURRENT_SUBNET_CIDR" != "$CAE_SUBNET_CIDR" ]; then
+                    echo "❌ Le subnet '$CAE_SUBNET_NAME' existe avec la plage '$CURRENT_SUBNET_CIDR' (attendu: '$CAE_SUBNET_CIDR')."
+                    exit 1
+                  fi
+                else
+                  echo "Création du subnet '$CAE_SUBNET_NAME' ($CAE_SUBNET_CIDR)"
+
+                  az network vnet subnet create \
+                    --resource-group "$VNET_RG" \
+                    --vnet-name "$VNET_NAME" \
+                    --name "$CAE_SUBNET_NAME" \
+                    --address-prefixes "$CAE_SUBNET_CIDR" \
+                    --only-show-errors >/dev/null
+                fi
+
+                az network vnet subnet update \
+                  --resource-group "$VNET_RG" \
+                  --vnet-name "$VNET_NAME" \
+                  --name "$CAE_SUBNET_NAME" \
+                  --delegations Microsoft.App/environments \
+                  --only-show-errors >/dev/null
+
+                echo "✅ Réseau prêt:"
+                echo "   - Subnet PE   : '$PE_SUBNET_NAME' ($PE_SUBNET_CIDR)"
+                echo "   - Subnet CAE  : '$CAE_SUBNET_NAME' ($CAE_SUBNET_CIDR, délégation Microsoft.App/environments)"

@@ -118,14 +118,45 @@ steps:
           --query loginServer -o tsv \
           --only-show-errors)
 
-        # La MSI expose deux identifiants utiles ici :
-        # - id       : resource ID Azure pour lier le registry ACR
-        # - clientId : identifiant Entra pour le host Functions et DefaultAzureCredential
-        read -r MSI_ID MSI_CLIENT_ID <<< "$(az identity show \
+        # Resource ID de la MSI user-assigned (utilisé pour registry set)
+        MSI_ID=$(az identity show \
           --name "${{ parameters.managedIdentityName }}" \
           --resource-group "${{ parameters.sharedResourceGroupName }}" \
-          --query "[id,clientId]" -o tsv \
-          --only-show-errors)"
+          --query id -o tsv \
+          --only-show-errors)
+
+        # Client ID de la MSI user-assigned (utilisé par DefaultAzureCredential / host Functions)
+        MSI_CLIENT_ID=$(az identity show \
+          --name "${{ parameters.managedIdentityName }}" \
+          --resource-group "${{ parameters.sharedResourceGroupName }}" \
+          --query clientId -o tsv \
+          --only-show-errors)
+
+        if [ -z "$MSI_ID" ] || [ -z "$MSI_CLIENT_ID" ]; then
+          echo "❌ Impossible de récupérer id/clientId pour la MSI '${{ parameters.managedIdentityName }}'"
+          exit 1
+        fi
+
+        # Garde-fou réseau: si Storage est fermé au public, le CAE doit être intégré à un subnet.
+        STORAGE_PNA=$(az storage account show \
+          --name "${{ parameters.storageAccountName }}" \
+          --resource-group "${{ parameters.sharedResourceGroupName }}" \
+          --query publicNetworkAccess -o tsv \
+          --only-show-errors)
+
+        CAE_SUBNET_ID=$(az containerapp env show \
+          --name "${{ parameters.containerAppsEnvName }}" \
+          --resource-group "${{ parameters.sharedResourceGroupName }}" \
+          --query "properties.vnetConfiguration.infrastructureSubnetId" -o tsv \
+          --only-show-errors 2>/dev/null || true)
+
+        STORAGE_PNA_LC=$(echo "$STORAGE_PNA" | tr '[:upper:]' '[:lower:]')
+        if [ "$STORAGE_PNA_LC" = "disabled" ] && [ -z "$CAE_SUBNET_ID" ]; then
+          echo "❌ Incohérence réseau: Storage publicNetworkAccess=Disabled mais le Container Apps Environment n'est pas intégré à un subnet."
+          echo "   Résultat attendu: accès Blob en 403 depuis la Container App."
+          echo "   Action: intégrer le CAE à un subnet routé vers les Private Endpoints, ou laisser l'accès public Storage actif."
+          exit 1
+        fi
 
         IMAGE_NAME="$ACR_LOGIN_SERVER/${{ parameters.imageName }}:${{ parameters.imageTag }}"
 

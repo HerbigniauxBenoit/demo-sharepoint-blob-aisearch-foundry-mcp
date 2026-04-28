@@ -176,17 +176,14 @@ stages:
       dependsOn:
         - CreateResourceGroup
 
-  # Stage 6 : Créer Container Apps Environment
-  - template: templates/stages/stage-create-container-apps-env.yml
+  # Stage 6 : Créer le réseau partagé (VNet + subnets)
+  - template: templates/stages/stage-create-network.yml
     parameters:
       azureSubscription: $(azureSubscription)
       resourceGroupName: $(resourceGroupName)
-      location: ${{ parameters.location }}
-      containerAppsEnvName: $(containerAppsEnvName)
-      logAnalyticsName: $(logAnalyticsName)
       environment: ${{ parameters.environment }}
       dependsOn:
-        - CreateMonitoring
+        - CreateResourceGroup
 
   # Stage 7 : Créer Azure Container Registry
   - template: templates/stages/stage-create-acr.yml
@@ -200,14 +197,19 @@ stages:
       dependsOn:
         - CreateResourceGroup
 
-  # Stage 8 : Créer le réseau partagé (VNet + subnet Private Endpoints)
-  - template: templates/stages/stage-create-network.yml
+  # Stage 8 : Créer Container Apps Environment (intégré VNet)
+  - template: templates/stages/stage-create-container-apps-env.yml
     parameters:
       azureSubscription: $(azureSubscription)
       resourceGroupName: $(resourceGroupName)
+      networkResourceGroupName: $(networkResourceGroupName)
+      location: ${{ parameters.location }}
+      containerAppsEnvName: $(containerAppsEnvName)
+      logAnalyticsName: $(logAnalyticsName)
       environment: ${{ parameters.environment }}
       dependsOn:
-        - CreateResourceGroup
+        - CreateMonitoring
+        - CreateNetwork
 
   # Stage 9 : Durcissement réseau optionnel
   - ${{ if eq(parameters.allowSecurity, true) }}:

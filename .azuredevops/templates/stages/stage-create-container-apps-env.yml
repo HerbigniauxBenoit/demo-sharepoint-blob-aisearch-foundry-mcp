@@ -6,6 +6,9 @@ parameters:
     type: string
   - name: resourceGroupName
     type: string
+  - name: networkResourceGroupName
+    type: string
+    default: ''
   - name: location
     type: string
   - name: containerAppsEnvName
@@ -35,8 +38,71 @@ stages:
               scriptType: 'bash'
               scriptLocation: 'inlineScript'
               inlineScript: |
+                set -euo pipefail
+
+                APP_RG="${{ parameters.resourceGroupName }}"
+                NETWORK_RG="${{ parameters.networkResourceGroupName }}"
+                if [ -z "$NETWORK_RG" ]; then
+                  NETWORK_RG="$APP_RG"
+                fi
+
+                case "${{ parameters.environment }}" in
+                  dev)  VNET_NAME="vnet-gptrusted-dev"  ;;
+                  nprd) VNET_NAME="vnet-gptrusted-nprd" ;;
+                  prod) VNET_NAME="vnet-gptrusted-prod" ;;
+                  *)    VNET_NAME="vnet-gptrusted-${{ parameters.environment }}" ;;
+                esac
+
+                CAE_SUBNET_NAME="snet-companion-cae-infra"
+                SUBSCRIPTION_ID=$(az account show --query id -o tsv)
+
+                VNET_COUNT=$(az network vnet list \
+                  --query "length([?name=='$VNET_NAME'])" -o tsv)
+
+                if [ "$VNET_COUNT" -eq 0 ]; then
+                  echo "❌ VNet '$VNET_NAME' introuvable dans l'abonnement courant."
+                  exit 1
+                fi
+
+                if [ "$VNET_COUNT" -gt 1 ]; then
+                  echo "❌ Plusieurs VNets nommés '$VNET_NAME' trouvés."
+                  exit 1
+                fi
+
+                VNET_RG=$(az network vnet list \
+                  --query "[?name=='$VNET_NAME']|[0].resourceGroup" -o tsv)
+
+                if ! az network vnet subnet show \
+                  --resource-group "$VNET_RG" \
+                  --vnet-name "$VNET_NAME" \
+                  --name "$CAE_SUBNET_NAME" >/dev/null 2>&1; then
+                  echo "❌ Subnet CAE '$CAE_SUBNET_NAME' introuvable (VNet: $VNET_NAME, RG: $VNET_RG)."
+                  echo "   Exécute d'abord le stage CreateNetwork."
+                  exit 1
+                fi
+
+                CAE_SUBNET_ID="/subscriptions/$SUBSCRIPTION_ID/resourceGroups/$VNET_RG/providers/Microsoft.Network/virtualNetworks/$VNET_NAME/subnets/$CAE_SUBNET_NAME"
+
                 if az containerapp env show --name "${{ parameters.containerAppsEnvName }}" --resource-group "${{ parameters.resourceGroupName }}" &>/dev/null; then
                   echo "ℹ️  Container Apps Environment '${{ parameters.containerAppsEnvName }}' existe déjà, mise à jour des tags"
+
+                  CURRENT_SUBNET_ID=$(az containerapp env show \
+                    --name "${{ parameters.containerAppsEnvName }}" \
+                    --resource-group "${{ parameters.resourceGroupName }}" \
+                    --query "properties.vnetConfiguration.infrastructureSubnetId" -o tsv \
+                    --only-show-errors 2>/dev/null || true)
+
+                  if [ -z "$CURRENT_SUBNET_ID" ]; then
+                    echo "❌ Le CAE existant n'est pas intégré au VNet (infrastructureSubnetId vide)."
+                    echo "   Crée un nouveau CAE intégré VNet ou recrée ce CAE avec le subnet '$CAE_SUBNET_NAME'."
+                    exit 1
+                  fi
+
+                  if [ "$CURRENT_SUBNET_ID" != "$CAE_SUBNET_ID" ]; then
+                    echo "❌ Le CAE existant est intégré à un autre subnet: $CURRENT_SUBNET_ID"
+                    echo "   Attendu: $CAE_SUBNET_ID"
+                    exit 1
+                  fi
 
                   az containerapp env update \
                     --name "${{ parameters.containerAppsEnvName }}" \
@@ -66,6 +132,7 @@ stages:
                     --location "${{ parameters.location }}" \
                     --logs-workspace-id "$LAW_ID" \
                     --logs-workspace-key "$LAW_KEY" \
+                    --infrastructure-subnet-resource-id "$CAE_SUBNET_ID" \
                     --tags \
                       environment="${{ parameters.environment }}"
 
