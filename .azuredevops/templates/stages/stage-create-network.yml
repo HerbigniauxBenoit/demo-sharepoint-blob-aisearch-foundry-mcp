@@ -35,7 +35,7 @@ stages:
                 PE_SUBNET_NAME="snet-companion-private-endpoints"
                 PE_SUBNET_CIDR="10.26.140.64/26"
                 CAE_SUBNET_NAME="snet-companion-cae-infra"
-                CAE_SUBNET_CIDR="10.26.140.0/27"
+                CAE_SUBNET_CIDR="10.26.140.128/27"
 
                 case "${{ parameters.environment }}" in
                   dev)  VNET_NAME="vnet-gptrusted-dev"  ;;

@@ -1,0 +1,142 @@
+# =============================================================================
+# Step Template : Créer Shared Private Link AI Search → Storage
+# =============================================================================
+parameters:
+  - name: azureSubscription
+    type: string
+  - name: resourceGroupName
+    type: string
+  - name: aiSearchName
+    type: string
+  - name: storageAccountName
+    type: string
+
+steps:
+  - task: AzureCLI@2
+    displayName: '🔐 Créer Shared Private Link AI Search → Storage'
+    inputs:
+      azureSubscription: ${{ parameters.azureSubscription }}
+      scriptType: 'bash'
+      scriptLocation: 'inlineScript'
+      inlineScript: |
+        set -euo pipefail
+
+        echo "================================================"
+        echo "    SHARED PRIVATE LINK AI SEARCH → STORAGE     "
+        echo "================================================"
+        echo ""
+
+        RG="${{ parameters.resourceGroupName }}"
+        SEARCH_NAME="${{ parameters.aiSearchName }}"
+        STORAGE_NAME="${{ parameters.storageAccountName }}"
+        SPL_NAME="spl-${STORAGE_NAME}-blob"
+
+        STORAGE_ID=$(az storage account show \
+          --name "$STORAGE_NAME" \
+          --resource-group "$RG" \
+          --query id -o tsv)
+
+        if [ -z "$STORAGE_ID" ]; then
+          echo "❌ Impossible de récupérer l'ID du storage account."
+          exit 1
+        fi
+
+        echo "Storage ID: $STORAGE_ID"
+
+        # ----------------------------------------------------------------
+        # Vérification si le Shared Private Link existe déjà
+        # ----------------------------------------------------------------
+        echo "Vérification du Shared Private Link '$SPL_NAME'..."
+
+        EXISTING_STATUS=$(az search shared-private-link-resource show \
+          --service-name "$SEARCH_NAME" \
+          --resource-group "$RG" \
+          --name "$SPL_NAME" \
+          --query "properties.status" -o tsv 2>/dev/null || echo "NotFound")
+
+        if [ "$EXISTING_STATUS" == "Approved" ]; then
+          echo "✅ Shared Private Link déjà approuvé, skip."
+          exit 0
+        fi
+
+        if [ "$EXISTING_STATUS" != "NotFound" ]; then
+          echo "⚠️  Shared Private Link existant avec statut: $EXISTING_STATUS, recréation..."
+          az search shared-private-link-resource delete \
+            --service-name "$SEARCH_NAME" \
+            --resource-group "$RG" \
+            --name "$SPL_NAME" \
+            --yes \
+            --only-show-errors >/dev/null 2>&1 || true
+          sleep 10
+        fi
+
+        # ----------------------------------------------------------------
+        # Création du Shared Private Link
+        # ----------------------------------------------------------------
+        echo "Création du Shared Private Link '$SPL_NAME'..."
+
+        az search shared-private-link-resource create \
+          --service-name "$SEARCH_NAME" \
+          --resource-group "$RG" \
+          --name "$SPL_NAME" \
+          --resource-id "$STORAGE_ID" \
+          --group-id "blob" \
+          --request-message "Created by Azure DevOps pipeline" \
+          --only-show-errors >/dev/null
+
+        echo "⏳ Attente de provisioning du Shared Private Link..."
+
+        # ----------------------------------------------------------------
+        # Attente provisioning + approbation automatique côté storage
+        # ----------------------------------------------------------------
+        MAX_ATTEMPTS=20
+        for attempt in $(seq 1 $MAX_ATTEMPTS); do
+          sleep 15
+
+          STATUS=$(az search shared-private-link-resource show \
+            --service-name "$SEARCH_NAME" \
+            --resource-group "$RG" \
+            --name "$SPL_NAME" \
+            --query "properties.status" -o tsv 2>/dev/null || echo "Unknown")
+
+          PROVISIONING=$(az search shared-private-link-resource show \
+            --service-name "$SEARCH_NAME" \
+            --resource-group "$RG" \
+            --name "$SPL_NAME" \
+            --query "properties.provisioningState" -o tsv 2>/dev/null || echo "Unknown")
+
+          echo "   Tentative $attempt/$MAX_ATTEMPTS — provisioning: $PROVISIONING — connexion: $STATUS"
+
+          if [ "$STATUS" == "Approved" ]; then
+            echo "✅ Shared Private Link approuvé et actif"
+            exit 0
+          fi
+
+          if [ "$STATUS" == "Rejected" ] || [ "$STATUS" == "Disconnected" ]; then
+            echo "❌ Shared Private Link refusé (statut: $STATUS)"
+            echo "   Approuvez manuellement dans: Storage → Networking → Private endpoint connections"
+            exit 1
+          fi
+        done
+
+        # ----------------------------------------------------------------
+        # Approbation automatique via az network private-endpoint-connection
+        # ----------------------------------------------------------------
+        echo "⚠️  Approbation automatique de la connexion côté storage..."
+
+        PE_CONNECTION_ID=$(az network private-endpoint-connection list \
+          --id "$STORAGE_ID" \
+          --query "[?properties.privateLinkServiceConnectionState.status=='Pending'].id | [0]" \
+          -o tsv 2>/dev/null || true)
+
+        if [ -n "$PE_CONNECTION_ID" ]; then
+          az network private-endpoint-connection approve \
+            --id "$PE_CONNECTION_ID" \
+            --description "Approved by Azure DevOps pipeline" \
+            --only-show-errors >/dev/null
+          echo "✅ Connexion approuvée automatiquement"
+        else
+          echo "❌ Aucune connexion Pending trouvée sur le storage."
+          echo "   Approuvez manuellement dans: Storage → Networking → Private endpoint connections"
+          exit 1
+        fi
