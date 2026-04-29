@@ -393,11 +393,15 @@ stages:
                 # --- Container Apps Environment ---
                 # Azure requiert que l'accès public soit désactivé AVANT la création du PE
                 echo "Fermeture de l'accès public Container Apps Environment (requis avant PE)..."
+                # --public-network-access est disponible uniquement via l'extension containerapp (Preview)
+                # On installe / met à jour l'extension avant usage
+                az extension add --name containerapp --upgrade --only-show-errors
                 az containerapp env update \
                   --name "$CAE_NAME" \
                   --resource-group "$RG" \
-                  --public-network-enabled false \
+                  --public-network-access Disabled \
                   --only-show-errors >/dev/null
+                echo "✅ Accès public Container Apps Env désactivé"
                 CAE_ZONE_RG=$(ensure_private_dns_zone "privatelink.azurecontainerapps.net" | tail -n 1)
                 ensure_private_dns_link "privatelink.azurecontainerapps.net" "$CAE_ZONE_RG"
                 ensure_private_endpoint \
