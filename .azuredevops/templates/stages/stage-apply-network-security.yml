@@ -391,6 +391,13 @@ stages:
                   "$SEARCH_NAME"
 
                 # --- Container Apps Environment ---
+                # Azure requiert que l'accès public soit désactivé AVANT la création du PE
+                echo "Fermeture de l'accès public Container Apps Environment (requis avant PE)..."
+                az containerapp env update \
+                  --name "$CAE_NAME" \
+                  --resource-group "$RG" \
+                  --public-network-enabled false \
+                  --only-show-errors >/dev/null
                 CAE_ZONE_RG=$(ensure_private_dns_zone "privatelink.azurecontainerapps.net" | tail -n 1)
                 ensure_private_dns_link "privatelink.azurecontainerapps.net" "$CAE_ZONE_RG"
                 ensure_private_endpoint \
@@ -436,13 +443,6 @@ stages:
                   --name "$SEARCH_NAME" \
                   --resource-group "$RG" \
                   --public-network-access disabled \
-                  --only-show-errors >/dev/null
-
-                echo "Fermeture de l'accès public Container Apps Environment..."
-                az containerapp env update \
-                  --name "$CAE_NAME" \
-                  --resource-group "$RG" \
-                  --public-network-enabled false \
                   --only-show-errors >/dev/null
 
                 if [ "$ACR_PRIVATE_READY" = "true" ]; then
