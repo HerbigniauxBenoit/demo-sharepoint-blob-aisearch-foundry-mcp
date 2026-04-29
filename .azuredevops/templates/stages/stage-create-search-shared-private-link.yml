@@ -10,6 +10,8 @@ parameters:
     type: string
   - name: storageAccountName
     type: string
+  - name: environment
+    type: string 
   - name: dependsOn
     type: object
     default: []

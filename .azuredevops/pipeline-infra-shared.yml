@@ -218,6 +218,7 @@ stages:
       resourceGroupName: $(resourceGroupName)
       aiSearchName: $(aiSearchName)
       storageAccountName: $(storageAccountName)
+      environment: ${{ parameters.environment }}
       dependsOn:
         - CreateStorageAccount
         - CreateAISearch
