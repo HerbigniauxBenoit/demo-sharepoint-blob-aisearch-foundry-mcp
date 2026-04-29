@@ -22,6 +22,8 @@ parameters:
     type: string
   - name: acrName
     type: string
+  - name: containerAppsEnvName
+    type: string
   - name: dependsOn
     type: object
     default: []
@@ -37,7 +39,7 @@ stages:
           name: gptrusted-${{ parameters.environment }}
         steps:
           - task: AzureCLI@2
-            displayName: '🔐 Private Endpoints + fermeture accès public (sauf monitoring et Container Apps)'
+            displayName: '🔐 Private Endpoints + fermeture accès public (sauf monitoring et ACR)'
             inputs:
               azureSubscription: ${{ parameters.azureSubscription }}
               scriptType: 'bash'
@@ -86,6 +88,7 @@ stages:
                 STORAGE_NAME="${{ parameters.storageAccountName }}"
                 SEARCH_NAME="${{ parameters.aiSearchName }}"
                 ACR_NAME="${{ parameters.acrName }}"
+                CAE_NAME="${{ parameters.containerAppsEnvName }}"
 
                 # IDs complets pour les opérations cross-RG
                 SUBNET_ID="/subscriptions/$SUBSCRIPTION_ID/resourceGroups/$VNET_RG/providers/Microsoft.Network/virtualNetworks/$VNET_NAME/subnets/$SUBNET_NAME"
@@ -124,6 +127,11 @@ stages:
                   --name "$ACR_NAME" \
                   --resource-group "$RG" \
                   --query sku.name -o tsv)
+
+                CAE_ID=$(az containerapp env show \
+                  --name "$CAE_NAME" \
+                  --resource-group "$RG" \
+                  --query id -o tsv)
 
                 # ----------------------------------------------------------------
                 # Audit exposition réseau
@@ -382,6 +390,17 @@ stages:
                   "$SEARCH_ZONE_RG" \
                   "$SEARCH_NAME"
 
+                # --- Container Apps Environment ---
+                CAE_ZONE_RG=$(ensure_private_dns_zone "privatelink.azurecontainerapps.net" | tail -n 1)
+                ensure_private_dns_link "privatelink.azurecontainerapps.net" "$CAE_ZONE_RG"
+                ensure_private_endpoint \
+                  "pe-${CAE_NAME}-cae" \
+                  "$CAE_ID" \
+                  "managementPlane" \
+                  "privatelink.azurecontainerapps.net" \
+                  "$CAE_ZONE_RG" \
+                  "$CAE_NAME"
+
                 # --- ACR (Premium uniquement) ---
                 ACR_PRIVATE_READY="false"
                 if [ "$ACR_SKU" = "Premium" ]; then
@@ -419,6 +438,13 @@ stages:
                   --public-network-access disabled \
                   --only-show-errors >/dev/null
 
+                echo "Fermeture de l'accès public Container Apps Environment..."
+                az containerapp env update \
+                  --name "$CAE_NAME" \
+                  --resource-group "$RG" \
+                  --public-network-enabled false \
+                  --only-show-errors >/dev/null
+
                 if [ "$ACR_PRIVATE_READY" = "true" ]; then
                   echo "Fermeture de l'accès public ACR..."
                   az acr update \
@@ -432,7 +458,19 @@ stages:
 
                 echo ""
                 echo "✅ Durcissement réseau terminé"
-                echo "ℹ️  Monitoring (Log Analytics/App Insights) laissé public selon la politique demandée."
-                echo "ℹ️  Container Apps non modifié selon l'exception demandée."
+                echo "ℹ️  Ressources PRIVÉES (PE + accès public fermé):"
+                echo "    - Storage Blob"
+                echo "    - AI Search"
+                echo "    - Container Apps Environment"
+                if [ "$ACR_PRIVATE_READY" = "true" ]; then
+                  echo "    - ACR (Private Endpoint activé)"
+                fi
+                echo ""
+                echo "ℹ️  Ressources PUBLIQUES:"
+                echo "    - Log Analytics"
+                echo "    - Application Insights"
+                if [ "$ACR_PRIVATE_READY" != "true" ]; then
+                  echo "    - ACR (SKU non Premium)"
+                fi
                 echo ""
                 print_audit

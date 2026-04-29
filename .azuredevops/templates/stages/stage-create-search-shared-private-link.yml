@@ -1,0 +1,31 @@
+# =============================================================================
+# Stage Template : Créer Shared Private Link AI Search → Storage
+# =============================================================================
+parameters:
+  - name: azureSubscription
+    type: string
+  - name: resourceGroupName
+    type: string
+  - name: aiSearchName
+    type: string
+  - name: storageAccountName
+    type: string
+  - name: dependsOn
+    type: object
+    default: []
+
+stages:
+  - stage: CreateSearchSharedPrivateLink
+    displayName: '🔐 Créer Shared Private Link AI Search → Storage'
+    dependsOn: ${{ parameters.dependsOn }}
+    jobs:
+      - job: CreateSPL
+        displayName: 'Créer le Shared Private Link'
+        pool: gptrusted-${{ parameters.environment }}
+        steps:
+          - template: ../steps/step-create-search-shared-private-link.yml
+            parameters:
+              azureSubscription: ${{ parameters.azureSubscription }}
+              resourceGroupName: ${{ parameters.resourceGroupName }}
+              aiSearchName: ${{ parameters.aiSearchName }}
+              storageAccountName: ${{ parameters.storageAccountName }}

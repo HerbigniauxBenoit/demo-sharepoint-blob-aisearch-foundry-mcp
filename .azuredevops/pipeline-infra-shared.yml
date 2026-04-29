@@ -211,7 +211,19 @@ stages:
         - CreateMonitoring
         - CreateNetwork
 
-  # Stage 9 : Durcissement réseau optionnel
+  # Stage 9 : Créer Shared Private Link AI Search → Storage
+  - template: templates/stages/stage-create-search-shared-private-link.yml
+    parameters:
+      azureSubscription: $(azureSubscription)
+      resourceGroupName: $(resourceGroupName)
+      aiSearchName: $(aiSearchName)
+      storageAccountName: $(storageAccountName)
+      dependsOn:
+        - CreateStorageAccount
+        - CreateAISearch
+        - CreateContainerAppsEnv
+
+  # Stage 10 : Durcissement réseau optionnel
   - ${{ if eq(parameters.allowSecurity, true) }}:
     - template: templates/stages/stage-apply-network-security.yml
       parameters:
@@ -224,14 +236,16 @@ stages:
         storageAccountName: $(storageAccountName)
         aiSearchName: $(aiSearchName)
         acrName: $(acrName)
+        containerAppsEnvName: $(containerAppsEnvName)
         dependsOn:
           - CreateNetwork
           - CreateStorageAccount
           - CreateAISearch
           - CreateContainerAppsEnv
+          - CreateSearchSharedPrivateLink
           - CreateAzureContainerRegistry
 
-  # Stage 10 : Résumé (toujours dernier)
+  # Stage 11 : Résumé (toujours dernier)
   - template: templates/stages/stage-infra-summary.yml
     parameters:
       azureSubscription: $(azureSubscription)
@@ -247,6 +261,7 @@ stages:
         - CreateStorageAccount
         - CreateAISearch
         - CreateContainerAppsEnv
+        - CreateSearchSharedPrivateLink
         - CreateAzureContainerRegistry
         - ${{ if eq(parameters.allowSecurity, true) }}:
           - ApplyNetworkSecurity
